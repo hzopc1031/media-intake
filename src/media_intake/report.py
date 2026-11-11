@@ -39,7 +39,12 @@ def _item_lines(job: JobResult, *, include_error: bool = False) -> list[str]:
     elif job.status.value == "succeeded":
         lines.append("      字幕：无来源字幕")
     if job.transcript_path:
-        lines.append(f"      转写：{job.transcript_path}")
+        detail = "，".join(
+            ([f"模型 {job.transcript_model}"] if job.transcript_model else [])
+            + ([f"语言 {job.transcript_language}"] if job.transcript_language else [])
+        )
+        note = f"（{detail}）" if detail else ""
+        lines.append(f"      转写：{job.transcript_path}{note}")
     if include_error and job.error:
         lines.append(f"      原因：{job.error}")
     return lines

@@ -27,7 +27,7 @@ class Library:
         media.<ext>           # 视频或音频
         source.srt            # 来源字幕（如有）
         source.txt            # 来源字幕纯文本（如有）
-        transcript.srt        # 预留给后续离线转写
+        transcript.srt        # 离线转写（若启用）
         transcript.txt
         *.info.json           # yt-dlp 元数据（下载模式）
     """
@@ -77,6 +77,8 @@ def manifest_record(job: JobResult) -> dict:
         "subtitle_kind": job.subtitle_kind.value if job.subtitle_kind else None,
         "transcript_path": job.transcript_path,
         "transcript_text_path": job.transcript_text_path,
+        "transcript_model": job.transcript_model,
+        "transcript_language": job.transcript_language,
         "parent_source": job.parent_source,
         "status": job.status.value,
         "error": job.error,
@@ -106,7 +108,7 @@ def render_index(jobs: list[JobResult], *, updated_at: str) -> str:
                     _cell(_format_duration(job.duration_seconds)),
                     _cell(job.media_path or ""),
                     _cell(job.subtitle_path or ""),
-                    _cell(job.transcript_path or ""),
+                    _cell(_transcript_cell(job)),
                     _cell(_status_label(job.status)),
                 ]
             )
@@ -119,6 +121,15 @@ def render_index(jobs: list[JobResult], *, updated_at: str) -> str:
             lines.append(f"- `{job.id}` {job.source}：{job.error or '未知错误'}")
     lines.append("")
     return "\n".join(lines)
+
+
+def _transcript_cell(job: JobResult) -> str:
+    if not job.transcript_path:
+        return ""
+    extra = [part for part in (job.transcript_model, job.transcript_language) if part]
+    if extra:
+        return f"{job.transcript_path}（{', '.join(extra)}）"
+    return job.transcript_path
 
 
 def _status_label(status: JobStatus) -> str:

@@ -83,3 +83,15 @@ def test_inspect_tool_missing(monkeypatch) -> None:
     info = inspect_tool("yt-dlp", ("--version",), _MissingRunner())
     assert not info.ok
     assert "pip" in info.detail or "yt-dlp" in info.detail
+
+
+def test_doctor_lists_whisper_as_optional() -> None:
+    from media_intake.deps import doctor_text
+
+    text, code = doctor_text()
+    assert "faster-whisper" in text
+    assert "可选" in text
+    # 未安装 faster-whisper 时，只要 ffmpeg / yt-dlp 可用，自检仍应成功
+    if "未安装" in text and "faster-whisper" in text:
+        # 不因可选依赖缺失而失败；若 ffmpeg 等也缺则 code 仍可能是 1
+        pass

@@ -103,7 +103,11 @@ def require_ytdlp(runner: CommandRunner | None = None) -> Path:
     return info.path
 
 
-def format_doctor_report(tools: list[ToolInfo]) -> str:
+def format_doctor_report(
+    tools: list[ToolInfo],
+    *,
+    optional: list[ToolInfo] | None = None,
+) -> str:
     lines = ["依赖自检："]
     all_ok = True
     for info in tools:
@@ -114,9 +118,41 @@ def format_doctor_report(tools: list[ToolInfo]) -> str:
             lines.append(f"  [缺失] {info.name}")
             for row in info.detail.splitlines():
                 lines.append(f"      {row}")
+    for info in optional or []:
+        if info.ok:
+            version = f"  ({info.version})" if info.version else ""
+            where = f": {info.path}" if info.path else ""
+            lines.append(f"  [ok] {info.name}{where}{version}  （可选）")
+        else:
+            lines.append(f"  [未安装] {info.name}  （可选，不影响下载和入库）")
+            for row in info.detail.splitlines():
+                lines.append(f"      {row}")
     lines.append("")
     lines.append("全部通过。" if all_ok else "存在缺失或不可执行的依赖，请按上面的提示安装后再试。")
     return "\n".join(lines) + "\n"
+
+
+def inspect_faster_whisper() -> ToolInfo:
+    from media_intake.transcribe import WHISPER_INSTALL_HINT, whisper_is_installed
+
+    if not whisper_is_installed():
+        return ToolInfo(
+            name="faster-whisper",
+            path=None,
+            version=None,
+            ok=False,
+            detail=WHISPER_INSTALL_HINT,
+        )
+    import faster_whisper
+
+    version = getattr(faster_whisper, "__version__", None)
+    return ToolInfo(
+        name="faster-whisper",
+        path=None,
+        version=version or "installed",
+        ok=True,
+        detail="optional",
+    )
 
 
 def doctor_text(runner: CommandRunner | None = None) -> tuple[str, int]:
@@ -125,7 +161,7 @@ def doctor_text(runner: CommandRunner | None = None) -> tuple[str, int]:
         inspect_ffprobe(runner),
         inspect_ytdlp(runner),
     ]
-    text = format_doctor_report(tools)
+    text = format_doctor_report(tools, optional=[inspect_faster_whisper()])
     return text, (0 if all(t.ok for t in tools) else 1)
 
 

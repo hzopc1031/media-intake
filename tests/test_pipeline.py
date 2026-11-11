@@ -155,7 +155,7 @@ class _DummyTranscriber:
         txt = dest_dir / "produced.txt"
         srt.write_text("1\n00:00:00,000 --> 00:00:01,000\n转写\n", encoding="utf-8")
         txt.write_text("转写\n", encoding="utf-8")
-        return TranscriptResult(srt_path=srt, text_path=txt, engine="dummy")
+        return TranscriptResult(srt_path=srt, text_path=txt, engine="dummy", language="zh", model="dummy")
 
 
 def test_transcriber_hook_used_when_no_source_subs(tmp_path: Path) -> None:
@@ -167,6 +167,7 @@ def test_transcriber_hook_used_when_no_source_subs(tmp_path: Path) -> None:
     options = BatchOptions(
         library_root=tmp_path / "lib",
         retries=0,
+        transcribe_mode="missing",
         transcriber=_DummyTranscriber(),  # type: ignore[arg-type]
     )
     runner = FakeRunner()
@@ -175,6 +176,11 @@ def test_transcriber_hook_used_when_no_source_subs(tmp_path: Path) -> None:
     job = report.succeeded[0]
     assert job.transcript_path and job.transcript_path.endswith("transcript.srt")
     assert (options.library_root / job.transcript_path).read_text(encoding="utf-8").find("转写") >= 0
+    assert job.transcript_model == "dummy"
+    assert job.transcript_language == "zh"
+    rec = json.loads((options.library_root / "manifest.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert rec["transcript_model"] == "dummy"
+    assert rec["transcript_language"] == "zh"
 
 
 def test_collect_source_id_stable() -> None:

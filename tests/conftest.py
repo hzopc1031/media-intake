@@ -55,3 +55,42 @@ def generate_sample_media(dest: Path, *, duration: float = 2.0) -> Path:
     ]
     subprocess.run(cmd, check=True)
     return dest
+
+
+def flite_available() -> bool:
+    if not ffmpeg_available():
+        return False
+    result = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-filters"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return "flite" in (result.stdout or "")
+
+
+requires_flite = pytest.mark.skipif(not flite_available(), reason="本机 ffmpeg 未启用 flite 滤镜")
+
+
+def generate_speech_wav(dest: Path, text: str = "The water is blue today.") -> Path:
+    """用 ffmpeg 的 flite 滤镜合成一句英语语音，不依赖网络。"""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    safe = text.replace("\\", " ").replace("'", " ").replace(":", " ").replace(",", " ")
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        f"flite=text='{safe}':voice=slt",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        str(dest),
+    ]
+    subprocess.run(cmd, check=True)
+    return dest

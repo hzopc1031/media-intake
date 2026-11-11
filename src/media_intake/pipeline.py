@@ -7,7 +7,7 @@ from pathlib import Path
 from media_intake.config import BatchOptions
 from media_intake.deps import require_ffmpeg, require_ytdlp
 from media_intake.download import pick_media_file, pick_subtitle_files
-from media_intake.errors import InputError, IntakeError, JobError
+from media_intake.errors import DependencyError, InputError, IntakeError, JobError
 from media_intake.extractors import BackendRegistry, default_registry
 from media_intake.inputs import classify, source_id
 from media_intake.library import Library, utc_now
@@ -16,6 +16,12 @@ from media_intake.probe import archive_local_file, ffprobe_media
 from media_intake.process import CommandRunner, SubprocessRunner
 from media_intake.store import JobStore
 from media_intake.subtitles import find_sidecar_subtitles, write_plain_text
+from media_intake.transcribe import (
+    FasterWhisperTranscriber,
+    TranscribeMode,
+    WHISPER_INSTALL_HINT,
+    should_transcribe,
+)
 
 
 def run_batch(
@@ -28,6 +34,7 @@ def run_batch(
 ) -> RunReport:
     """处理一批链接或本地文件。命令行与后续 MCP 共用此入口。"""
     runner = runner or SubprocessRunner()
+    _prepare_transcriber(options)
     library = Library(options.library_root)
     library.prepare()
     store = JobStore(library.state_path)
@@ -287,18 +294,9 @@ def _process_local(
         extra_sources=find_sidecar_subtitles(src_path),
         preferred_langs=_lang_list(options.sub_langs),
     )
-    transcript_path = dest / "transcript.srt"
-    transcript_text = dest / "transcript.txt"
-    has_transcript = False
-    if subtitle_path is None and options.transcriber is not None and options.transcriber.available():
-        produced = options.transcriber.transcribe(media, dest)
-        if produced.srt_path.resolve() != transcript_path.resolve():
-            transcript_path.write_bytes(produced.srt_path.read_bytes())
-        if produced.text_path.resolve() != transcript_text.resolve():
-            transcript_text.write_bytes(produced.text_path.read_bytes())
-        elif not transcript_text.exists():
-            write_plain_text(transcript_path, transcript_text)
-        has_transcript = True
+    transcript_path, transcript_text, transcript_model, transcript_language = _maybe_transcribe(
+        media, dest, options, has_source_subs=subtitle_path is not None
+    )
     return JobResult(
         id=job_id,
         source=source.raw,
@@ -311,8 +309,10 @@ def _process_local(
         subtitle_path=library.rel(subtitle_path),
         subtitle_text_path=library.rel(subtitle_text),
         subtitle_kind=kind,
-        transcript_path=library.rel(transcript_path) if has_transcript else None,
-        transcript_text_path=library.rel(transcript_text) if has_transcript else None,
+        transcript_path=library.rel(transcript_path),
+        transcript_text_path=library.rel(transcript_text),
+        transcript_model=transcript_model,
+        transcript_language=transcript_language,
         parent_source=source.parent_source,
     )
 
@@ -342,18 +342,9 @@ def _process_url(
         preferred_langs=_lang_list(options.sub_langs),
         auto_hint=options.write_auto_subs,
     )
-    has_transcript = False
-    transcript_path = dest / "transcript.srt"
-    transcript_text = dest / "transcript.txt"
-    if subtitle_path is None and options.transcriber is not None and options.transcriber.available():
-        produced = options.transcriber.transcribe(media, dest)
-        if produced.srt_path.resolve() != transcript_path.resolve():
-            transcript_path.write_bytes(produced.srt_path.read_bytes())
-        if produced.text_path.resolve() != transcript_text.resolve():
-            transcript_text.write_bytes(produced.text_path.read_bytes())
-        elif not transcript_text.exists():
-            write_plain_text(transcript_path, transcript_text)
-        has_transcript = True
+    transcript_path, transcript_text, transcript_model, transcript_language = _maybe_transcribe(
+        media, dest, options, has_source_subs=subtitle_path is not None
+    )
     return JobResult(
         id=job_id,
         source=source.raw,
@@ -366,10 +357,55 @@ def _process_url(
         subtitle_path=library.rel(subtitle_path),
         subtitle_text_path=library.rel(subtitle_text),
         subtitle_kind=kind,
-        transcript_path=library.rel(transcript_path) if has_transcript else None,
-        transcript_text_path=library.rel(transcript_text) if has_transcript else None,
+        transcript_path=library.rel(transcript_path),
+        transcript_text_path=library.rel(transcript_text),
+        transcript_model=transcript_model,
+        transcript_language=transcript_language,
         parent_source=source.parent_source,
     )
+
+
+
+def _prepare_transcriber(options: BatchOptions) -> None:
+    if options.transcribe_mode is TranscribeMode.NEVER:
+        return
+    if options.transcriber is None:
+        options.transcriber = FasterWhisperTranscriber(
+            model=options.whisper_model,
+            device=options.whisper_device,
+            compute_type=options.whisper_compute_type,
+            language=options.whisper_language,
+        )
+    if not options.transcriber.available():
+        raise DependencyError(WHISPER_INSTALL_HINT)
+
+
+def _maybe_transcribe(
+    media: Path,
+    dest: Path,
+    options: BatchOptions,
+    *,
+    has_source_subs: bool,
+) -> tuple[Path | None, Path | None, str | None, str | None]:
+    if not should_transcribe(
+        options.transcribe_mode,
+        has_source_subs=has_source_subs,
+        media_path=media,
+    ):
+        return None, None, None, None
+    transcriber = options.transcriber
+    if transcriber is None or not transcriber.available():
+        raise JobError(WHISPER_INSTALL_HINT)
+    produced = transcriber.transcribe(media, dest)
+    transcript_path = dest / "transcript.srt"
+    transcript_text = dest / "transcript.txt"
+    if produced.srt_path.resolve() != transcript_path.resolve():
+        transcript_path.write_bytes(produced.srt_path.read_bytes())
+    if produced.text_path.resolve() != transcript_text.resolve():
+        transcript_text.write_bytes(produced.text_path.read_bytes())
+    elif not transcript_text.exists():
+        write_plain_text(transcript_path, transcript_text)
+    return transcript_path, transcript_text, produced.model, produced.language
 
 
 def _ingest_subtitles(

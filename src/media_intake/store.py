@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     subtitle_kind TEXT,
     transcript_path TEXT,
     transcript_text_path TEXT,
+    transcript_model TEXT,
+    transcript_language TEXT,
     parent_source TEXT,
     extra_json TEXT,
     created_at TEXT NOT NULL,
@@ -44,8 +46,13 @@ class JobStore:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(_SCHEMA)
             cols = {row[1] for row in self._conn.execute("PRAGMA table_info(jobs)")}
-            if "parent_source" not in cols:
-                self._conn.execute("ALTER TABLE jobs ADD COLUMN parent_source TEXT")
+            for column, decl in (
+                ("parent_source", "TEXT"),
+                ("transcript_model", "TEXT"),
+                ("transcript_language", "TEXT"),
+            ):
+                if column not in cols:
+                    self._conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {decl}")
             self._conn.commit()
 
     def close(self) -> None:
@@ -80,9 +87,10 @@ class JobStore:
                     id, source, source_kind, status, attempts, error, title,
                     duration_seconds, item_dir, media_path, subtitle_path,
                     subtitle_text_path, subtitle_kind, transcript_path,
-                    transcript_text_path, parent_source, extra_json, created_at, updated_at,
+                    transcript_text_path, transcript_model, transcript_language,
+                    parent_source, extra_json, created_at, updated_at,
                     started_at, finished_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     source=excluded.source,
                     source_kind=excluded.source_kind,
@@ -98,6 +106,8 @@ class JobStore:
                     subtitle_kind=excluded.subtitle_kind,
                     transcript_path=excluded.transcript_path,
                     transcript_text_path=excluded.transcript_text_path,
+                    transcript_model=excluded.transcript_model,
+                    transcript_language=excluded.transcript_language,
                     parent_source=excluded.parent_source,
                     extra_json=excluded.extra_json,
                     updated_at=excluded.updated_at,
@@ -120,6 +130,8 @@ class JobStore:
                     result.subtitle_kind.value if result.subtitle_kind else None,
                     result.transcript_path,
                     result.transcript_text_path,
+                    result.transcript_model,
+                    result.transcript_language,
                     result.parent_source,
                     None,
                     created,
@@ -158,6 +170,8 @@ def _row_to_result(row: sqlite3.Row) -> JobResult:
         subtitle_kind=kind,
         transcript_path=row["transcript_path"],
         transcript_text_path=row["transcript_text_path"],
+        transcript_model=row["transcript_model"] if "transcript_model" in keys else None,
+        transcript_language=row["transcript_language"] if "transcript_language" in keys else None,
         parent_source=row["parent_source"] if "parent_source" in keys else None,
         error=row["error"],
         attempts=row["attempts"],

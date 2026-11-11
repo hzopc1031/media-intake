@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from media_intake.transcribe import Transcriber
+from media_intake.transcribe import TranscribeMode, Transcriber, parse_transcribe_mode
 
 
 @dataclass
@@ -27,6 +27,11 @@ class BatchOptions:
     expand: bool = False
     max_items: int | None = None
     transcriber: Transcriber | None = None
+    transcribe_mode: TranscribeMode | str = TranscribeMode.NEVER
+    whisper_model: str = "base"
+    whisper_device: str = "auto"
+    whisper_compute_type: str = "auto"
+    whisper_language: str | None = None
 
     def __post_init__(self) -> None:
         self.library_root = Path(self.library_root).expanduser().resolve()
@@ -44,3 +49,10 @@ class BatchOptions:
             raise ValueError("展开条数上限 --max-items 必须大于等于 1")
         if self.max_items is not None and not self.expand:
             raise ValueError("--max-items 只能与 --expand / --playlist 一起使用")
+        self.transcribe_mode = parse_transcribe_mode(self.transcribe_mode)
+        self.whisper_model = (self.whisper_model or "base").strip() or "base"
+        self.whisper_device = (self.whisper_device or "auto").strip() or "auto"
+        self.whisper_compute_type = (self.whisper_compute_type or "auto").strip() or "auto"
+        if self.whisper_language is not None:
+            lang = self.whisper_language.strip()
+            self.whisper_language = None if not lang or lang.lower() == "auto" else lang

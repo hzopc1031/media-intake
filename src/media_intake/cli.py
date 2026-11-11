@@ -147,6 +147,45 @@ def _build_parser() -> argparse.ArgumentParser:
         help="额外传给 yt-dlp 的单个参数，可重复。可用于登录相关选项，例如 --ytdlp-option --username",
     )
     run_p.add_argument(
+        "--transcribe",
+        nargs="?",
+        const="missing",
+        default="never",
+        choices=["never", "missing", "always"],
+        metavar="MODE",
+        help=(
+            "离线转写模式：never 不转写（默认）；"
+            "missing 仅在没有来源字幕时转写；"
+            "always 即使已有来源字幕也转写。"
+            "单独写 --transcribe 等于 missing。"
+            "需要先安装 media-intake[whisper]"
+        ),
+    )
+    run_p.add_argument(
+        "--whisper-model",
+        default="base",
+        metavar="NAME_OR_PATH",
+        help="faster-whisper 模型名（tiny、base、small、medium、large-v3 等）或本地模型目录（默认：base）",
+    )
+    run_p.add_argument(
+        "--whisper-device",
+        default="auto",
+        metavar="DEVICE",
+        help="转写设备：auto、cpu 或 cuda（默认：auto）",
+    )
+    run_p.add_argument(
+        "--whisper-compute-type",
+        default="auto",
+        metavar="TYPE",
+        help="计算类型：auto、int8、float16、float32 等（默认 auto：CPU 用 int8，CUDA 用 float16）",
+    )
+    run_p.add_argument(
+        "--whisper-language",
+        default="auto",
+        metavar="LANG",
+        help="转写语言，例如 en、zh；默认 auto，由模型自动检测",
+    )
+    run_p.add_argument(
         "--force",
         action="store_true",
         help="重新处理素材库中已经成功的条目",
@@ -159,8 +198,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser(
         "doctor",
-        help="检查 ffmpeg、ffprobe 和 yt-dlp 是否可用",
-        description="检查本机依赖，并在缺失时给出安装提示。\n\n" + LEGAL_NOTE,
+        help="检查 ffmpeg、ffprobe、yt-dlp，以及可选的 faster-whisper",
+        description="检查本机依赖（ffmpeg、ffprobe、yt-dlp；faster-whisper 为可选转写），并在缺失时给出安装提示。\n\n" + LEGAL_NOTE,
         epilog=LEGAL_NOTE,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -213,6 +252,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
             reference_local=args.reference,
             expand=args.expand,
             max_items=args.max_items,
+            transcribe_mode=args.transcribe,
+            whisper_model=args.whisper_model,
+            whisper_device=args.whisper_device,
+            whisper_compute_type=args.whisper_compute_type,
+            whisper_language=args.whisper_language,
         )
     except ValueError as exc:
         print(f"错误：{exc}", file=sys.stderr)

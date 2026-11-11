@@ -45,6 +45,8 @@ class JobResult:
     subtitle_kind: SubtitleKind | None = None
     transcript_path: str | None = None
     transcript_text_path: str | None = None
+    transcript_model: str | None = None
+    transcript_language: str | None = None
     parent_source: str | None = None
     error: str | None = None
     attempts: int = 0

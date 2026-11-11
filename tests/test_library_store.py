@@ -68,3 +68,23 @@ def test_render_index_escapes_pipes() -> None:
     job.title = "A | B"
     text = render_index([job], updated_at="t")
     assert "A \\| B" in text
+
+
+def test_manifest_and_store_keep_transcript_metadata(tmp_path: Path) -> None:
+    job = _job("ccc")
+    job.transcript_path = "items/ccc/transcript.srt"
+    job.transcript_text_path = "items/ccc/transcript.txt"
+    job.transcript_model = "tiny"
+    job.transcript_language = "en"
+    rec = manifest_record(job)
+    assert rec["transcript_model"] == "tiny"
+    assert rec["transcript_language"] == "en"
+    index = render_index([job], updated_at="t")
+    assert "transcript.srt（tiny, en）" in index
+    store = JobStore(tmp_path / "state.sqlite")
+    store.upsert(job, created_at="2026-11-11T00:00:00Z", updated_at="2026-11-11T00:00:01Z")
+    loaded = store.get("ccc")
+    assert loaded is not None
+    assert loaded.transcript_model == "tiny"
+    assert loaded.transcript_language == "en"
+    store.close()

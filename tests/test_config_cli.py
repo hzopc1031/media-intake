@@ -36,6 +36,11 @@ def test_run_help_lists_legal_note_and_new_flags() -> None:
     assert "--expand" in text
     assert "--playlist" in text
     assert "--max-items" in text
+    assert "--transcribe" in text
+    assert "--whisper-model" in text
+    assert "--whisper-device" in text
+    assert "--whisper-compute-type" in text
+    assert "--whisper-language" in text
 
 
 def test_root_help_contains_legal_note() -> None:
