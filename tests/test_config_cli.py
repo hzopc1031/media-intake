@@ -49,7 +49,9 @@ def test_root_help_contains_legal_note() -> None:
         with redirect_stdout(buf):
             main(["--help"])
     assert exited.value.code == 0
-    assert LEGAL_NOTE in buf.getvalue()
+    text = buf.getvalue()
+    assert LEGAL_NOTE in text
+    assert "mcp" in text
 
 
 def test_missing_cookies_file_returns_error(tmp_path: Path) -> None:
@@ -65,3 +67,16 @@ def test_missing_cookies_file_returns_error(tmp_path: Path) -> None:
         ]
     )
     assert code == 2
+
+
+def test_mcp_help_lists_tools() -> None:
+    buf = io.StringIO()
+    with pytest.raises(SystemExit) as exited:
+        with redirect_stdout(buf):
+            main(["mcp", "--help"])
+    assert exited.value.code == 0
+    text = buf.getvalue()
+    assert LEGAL_NOTE in text
+    assert "submit_batch" in text
+    assert "get_status" in text
+    assert "read_manifest" in text

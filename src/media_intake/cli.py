@@ -198,8 +198,19 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser(
         "doctor",
-        help="检查 ffmpeg、ffprobe、yt-dlp，以及可选的 faster-whisper",
-        description="检查本机依赖（ffmpeg、ffprobe、yt-dlp；faster-whisper 为可选转写），并在缺失时给出安装提示。\n\n" + LEGAL_NOTE,
+        help="检查 ffmpeg、ffprobe、yt-dlp，以及可选的 faster-whisper 和 MCP SDK",
+        description="检查本机依赖（ffmpeg、ffprobe、yt-dlp；faster-whisper 与 MCP SDK 为可选项），并在缺失时给出安装提示。\n\n" + LEGAL_NOTE,
+        epilog=LEGAL_NOTE,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sub.add_parser(
+        "mcp",
+        help="以 stdio 方式启动 MCP 服务",
+        description=(
+            "启动最小的 stdio MCP 服务器，提供 submit_batch、get_status、read_manifest 三个工具。"
+            "需要先安装 media-intake[mcp]。请由 MCP 客户端拉起本命令，不要在终端里交互使用。\n\n"
+            + LEGAL_NOTE
+        ),
         epilog=LEGAL_NOTE,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -227,6 +238,10 @@ def _dispatch(args: argparse.Namespace) -> int:
         text, code = update_ytdlp()
         print(text, end="")
         return code
+    if args.command == "mcp":
+        from media_intake.mcp_server import run_stdio
+
+        return run_stdio()
     if args.command == "run":
         return _cmd_run(args)
     raise AssertionError(f"未知命令：{args.command}")

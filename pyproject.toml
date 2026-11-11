@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "media-intake"
-version = "0.2.0"
-description = "Queue permitted media links or local files into a material library with source subtitles and optional offline transcription."
+version = "0.3.0"
+description = "Queue permitted media into a local library, with optional offline transcription and a stdio MCP server."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -28,11 +28,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.4"]
+dev = ["pytest>=7.4", "mcp>=1.0"]
 whisper = ["faster-whisper>=1.0.0"]
+mcp = ["mcp>=1.0"]
 
 [project.scripts]
 media-intake = "media_intake.cli:main"
+media-intake-mcp = "media_intake.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/hzopc1031/media-intake"

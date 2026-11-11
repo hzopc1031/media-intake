@@ -155,13 +155,35 @@ def inspect_faster_whisper() -> ToolInfo:
     )
 
 
+def inspect_mcp() -> ToolInfo:
+    from media_intake.mcp_server import MCP_INSTALL_HINT, mcp_is_installed
+
+    if not mcp_is_installed():
+        return ToolInfo(
+            name="mcp",
+            path=None,
+            version=None,
+            ok=False,
+            detail=MCP_INSTALL_HINT,
+        )
+    try:
+        from importlib.metadata import version as pkg_version
+
+        version = pkg_version("mcp")
+    except Exception:
+        version = "installed"
+    return ToolInfo(name="mcp", path=None, version=version, ok=True, detail="optional")
+
+
 def doctor_text(runner: CommandRunner | None = None) -> tuple[str, int]:
     tools = [
         inspect_ffmpeg(runner),
         inspect_ffprobe(runner),
         inspect_ytdlp(runner),
     ]
-    text = format_doctor_report(tools, optional=[inspect_faster_whisper()])
+    text = format_doctor_report(
+        tools, optional=[inspect_faster_whisper(), inspect_mcp()]
+    )
     return text, (0 if all(t.ok for t in tools) else 1)
 
 

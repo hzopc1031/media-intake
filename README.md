@@ -4,7 +4,7 @@
 
 本工具用于下载你自己的作品，以及平台条款或许可证允许下载的内容。
 
-当前版本是 **0.2.0**：在 0.1.1 的专用提取后端之外，增加了可选的离线转写（faster-whisper）。stdio MCP 服务仍计划在后续版本提供。
+当前版本是 **0.3.0**：在 0.2.0 的离线转写之外，增加了可选的 stdio MCP 服务（`submit_batch`、`get_status`、`read_manifest`）。
 
 ---
 
@@ -22,7 +22,7 @@
 
 ## 安装
 
-需要 Python 3.10+，以及系统里的 **ffmpeg**（含 ffprobe）。yt-dlp 会作为 Python 依赖一并安装。离线转写是可选功能，需要额外安装 faster-whisper。
+需要 Python 3.10+，以及系统里的 **ffmpeg**（含 ffprobe）。yt-dlp 会作为 Python 依赖一并安装。离线转写和 stdio MCP 服务是可选功能，分别需要额外安装 faster-whisper 和官方 `mcp` Python SDK。
 
 ```bash
 # 安装 ffmpeg（任选一种）
@@ -34,6 +34,8 @@ sudo apt-get update && sudo apt-get install -y ffmpeg
 python3 -m pip install -e .
 # 若要使用离线转写：
 python3 -m pip install -e ".[whisper]"
+# 若要作为 MCP 服务使用：
+python3 -m pip install -e ".[mcp]"
 ```
 
 尚未发布到 PyPI。请从本仓库安装。第一次转写时，faster-whisper 可能会从 Hugging Face 下载所选模型，耗时和体积取决于模型大小（`tiny` 较小，`large-v3` 很大），需要本机有足够磁盘和内存。本工具不会替你预装模型。
@@ -135,11 +137,47 @@ media-library/
 - 模型：`--whisper-model`，可以是 `tiny`、`base`（默认）、`small`、`medium`、`large-v3` 等公开模型名，或本机已有的模型目录。`--whisper-device` 默认 `auto`（有 CUDA 则用 GPU，否则 CPU）。`--whisper-compute-type` 默认 `auto`（CPU 用 `int8`，CUDA 用 `float16`）。`--whisper-language` 默认 `auto`，由模型检测。
 - 适用范围：下载后的视频/音频，以及本地文件（包括只提取了音频的文件）。图文笔记中的图片会跳过转写，不视为失败。转写前会用本机 ffmpeg 把媒体解成 16 kHz 单声道 PCM，再交给 faster-whisper。
 - 识别效果取决于模型和音频质量，不能保证字字正确。第一次使用某个模型时可能会下载权重，失败时条目会记为失败并留下错误原因。
-- `media-intake doctor` 会检查 faster-whisper 是否已安装，但它是可选项：未安装时自检仍可通过，只提示如何安装。
+- `media-intake doctor` 会检查 faster-whisper 和 MCP SDK 是否已安装，但它们都是可选项：未安装时自检仍可通过，只提示如何安装。
+
+## MCP 服务
+
+MCP 服务是可选功能。安装 `media-intake[mcp]` 后，可用 stdio 方式启动一个最小服务器，把同一套核心库暴露给 MCP 客户端。提供三个工具：
+
+- `submit_batch`：提交一批链接或本地文件。选项包括 `format`、`audio_only`、`subs`、`sub_langs`、`transcribe`、`cookies`（本机 cookies 文件路径）、`cookies_from_browser`、`expand`、`max_items`。任务在后台运行，工具立即返回 `batch_id`。也可传入与命令行对应的 `whisper_model`、`whisper_device`、`whisper_compute_type`、`whisper_language`。
+- `get_status`：按 `batch_id` 或条目 ID 查询。返回计数，以及各条目的状态和错误。查询单条条目时需要同时提供 `library`。
+- `read_manifest`：读取素材库的 `manifest.jsonl`。可用 `status`、`source_kind` 过滤，并用 `limit` 限制条数。
+
+启动方式任选其一：`media-intake mcp`、`media-intake-mcp`，或 `python3 -m media_intake.mcp_server`。服务走标准输入输出，请由 MCP 客户端拉起，不要在终端里交互使用。未安装 `mcp` 时，这些入口会提示如何安装并以退出码 2 结束。cookies 文件路径可以传给工具，但服务不会读取或打印 cookie 内容。批次状态写在素材库的 `.media-intake/batches/` 下，便于同一素材库再次查询。后台队列跑在当前进程的线程里，客户端退出后未完成的批次不会继续执行。
+
+在 MCP 客户端里的通用配置示例（请把命令换成你环境里实际可用的解释器或安装入口，不要写入本机个人路径）：
+
+```json
+{
+  "mcpServers": {
+    "media-intake": {
+      "command": "media-intake",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+也可以用模块入口：
+
+```json
+{
+  "mcpServers": {
+    "media-intake": {
+      "command": "python3",
+      "args": ["-m", "media_intake.mcp_server"]
+    }
+  }
+}
+```
 
 ## 测试
 
-默认测试全部离线、可重复、较快：使用 ffmpeg 在本地生成的短视频和侧车 `.srt`，用 mock 代替 yt-dlp 和 faster-whisper 模型。`make test` 与 CI **不会**从真实平台下载，也**不会**下载 Whisper 模型。
+默认测试全部离线、可重复、较快：使用 ffmpeg 在本地生成的短视频和侧车 `.srt`，用 mock 代替 yt-dlp 和 faster-whisper 模型。MCP 工具处理函数的单测不依赖真实媒体；进程内往返测试只用本地生成的短视频。`make test` 与 CI **不会**从真实平台下载，也**不会**下载 Whisper 模型。开发依赖里包含官方 `mcp` SDK，以便默认测试覆盖 MCP 往返。
 
 ```bash
 python3 -m pip install -e ".[dev]"
@@ -167,7 +205,7 @@ CI 在 GitHub Actions 上对 Linux 和 macOS、Python 3.10 与 3.13 运行 `make
 
 ## 开发说明
 
-核心逻辑在 `media_intake.pipeline.run_batch`，与命令行入口分离，便于后续做 stdio MCP（提交批次、查询状态、读取清单）。转写接口在 `media_intake.transcribe.Transcriber`，本版本提供 faster-whisper 实现。站点后端接口在 `media_intake.extractors`。
+核心逻辑在 `media_intake.pipeline.run_batch`，与命令行入口和 MCP 入口共享。MCP 工具处理函数在 `media_intake.batches.BatchManager`，不依赖 MCP SDK；`media_intake.mcp_server` 只做薄封装。转写接口在 `media_intake.transcribe.Transcriber`，本版本提供 faster-whisper 实现。站点后端接口在 `media_intake.extractors`。
 
 本仓库以 MIT 许可证发布。参考过开源下载器在批量参数、失败报告、素材清单和依赖自检方面的产品缺口，但实现与代码均为独立编写，没有复制或改写其它 GPL 项目的源码。底层下载仍调用 yt-dlp。
 
@@ -179,6 +217,6 @@ CI 在 GitHub Actions 上对 Linux 和 macOS、Python 3.10 与 3.13 运行 `make
 
 This tool is intended for downloading your own work and content that the platform terms or license allow you to download.
 
-Version 0.2.0 adds optional offline transcription with faster-whisper (`pip install 'media-intake[whisper]'`, then `--transcribe` / `--transcribe missing` / `--transcribe always`). It writes `transcript.srt` and `transcript.txt`, and records the model and language in the manifest. The default model is `base`; the first run may download model weights. Image notes are skipped. Version 0.1.1 added dedicated Douyin and Xiaohongshu backends (registered before yt-dlp, with yt-dlp fallback). They prefer a mobile UA, parse public share pages, and only use media URLs already present on the page or a public API; they do not rewrite watermarked URLs or generate signing parameters. Livestreams are reported as unsupported. A stdio MCP server is still planned. Proxy rotation is not provided.
+Version 0.3.0 adds a minimal stdio MCP server (`pip install 'media-intake[mcp]'`, then `media-intake mcp`, `media-intake-mcp`, or `python3 -m media_intake.mcp_server`). The tools are `submit_batch` (runs in the background and returns a batch id), `get_status`, and `read_manifest`. See the Chinese MCP section for a generic client JSON example; do not put personal paths in the config you commit. Version 0.2.0 added optional offline transcription with faster-whisper (`pip install 'media-intake[whisper]'`, then `--transcribe` / `--transcribe missing` / `--transcribe always`). It writes `transcript.srt` and `transcript.txt`, and records the model and language in the manifest. The default model is `base`; the first run may download model weights. Image notes are skipped. Version 0.1.1 added dedicated Douyin and Xiaohongshu backends (registered before yt-dlp, with yt-dlp fallback). They prefer a mobile UA, parse public share pages, and only use media URLs already present on the page or a public API; they do not rewrite watermarked URLs or generate signing parameters. Livestreams are reported as unsupported. Proxy rotation is not provided.
 
-Install ffmpeg yourself, then `python3 -m pip install -e .`. The project is not on PyPI yet. Run `media-intake doctor` to check ffmpeg, yt-dlp, and optional faster-whisper, and `media-intake run --help` for options (help text is in Chinese). Cookie files are gitignored and never logged. Default tests (`make test`) and CI stay offline and do not download Whisper models. Optional tiny-model tests are `MEDIA_INTAKE_WHISPER=1 make test-whisper`. Optional live-platform tests are `MEDIA_INTAKE_ONLINE=1 make test-online`.
+Install ffmpeg yourself, then `python3 -m pip install -e .`. The project is not on PyPI yet. Run `media-intake doctor` to check ffmpeg, yt-dlp, and optional faster-whisper and the MCP SDK, and `media-intake run --help` for options (help text is in Chinese). Cookie files are gitignored and never logged. Default tests (`make test`) and CI stay offline and do not download Whisper models. Optional tiny-model tests are `MEDIA_INTAKE_WHISPER=1 make test-whisper`. Optional live-platform tests are `MEDIA_INTAKE_ONLINE=1 make test-online`.
