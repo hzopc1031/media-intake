@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "media-intake"
-version = "0.4.0"
+version = "0.4.1"
 description = "Queue permitted media into a local library, with optional offline transcription, a stdio MCP server, and a detachable worker."
 readme = "README.md"
 license = "MIT"

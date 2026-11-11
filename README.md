@@ -4,7 +4,7 @@
 
 本工具用于下载你自己的作品，以及平台条款或许可证允许下载的内容。
 
-当前版本是 **0.4.0**：MCP 可以直接把字幕 / 转写正文和条目元数据交给模型（支持分页）；批次可交给独立 `worker` 运行，客户端退出后也能继续，并可查询与取消；转写可选用 whisperX（词级时间戳和可选说话人分离），默认仍是 faster-whisper；另外提供抖音 / 小红书 cookie 诊断，以及把外部工具已下载的文件导入素材库。逐步说明见 [docs/demo.md](docs/demo.md)。
+当前版本是 **0.4.1**：MCP 可以直接把字幕 / 转写正文和条目元数据交给模型（支持分页）；批次可交给独立 `worker` 运行，客户端退出后也能继续，并可查询与取消；转写可选用 whisperX（词级时间戳和可选说话人分离），默认仍是 faster-whisper；另外提供抖音 / 小红书 cookie 诊断，以及把外部工具已下载的文件导入素材库。逐步说明见 [docs/demo.md](docs/demo.md)。在 Linux 云服务器（含中国大陆网络环境）上部署见 [docs/server-deploy.md](docs/server-deploy.md)。
 
 ---
 
@@ -28,13 +28,18 @@
 # 安装 ffmpeg（任选一种）
 # macOS:
 brew install ffmpeg
-# Debian / Ubuntu:
+# Debian / Ubuntu（需要管理员权限）：
 sudo apt-get update && sudo apt-get install -y ffmpeg
 
+# 仓库尚未发布到 PyPI。能访问 GitHub 时：
+python3 -m pip install "media-intake[whisper,mcp] @ git+https://github.com/hzopc1031/media-intake.git@main"
+# 若 github.com 被拦截，可改用 GitHub 的 codeload 源，详见 docs/server-deploy.md。
+
+# 从本地源码安装时：
 python3 -m pip install -e .
 # 若要使用默认的 faster-whisper 离线转写：
 python3 -m pip install -e ".[whisper]"
-# 若要使用 whisperX（词级时间戳，可选说话人分离）：
+# 若要使用 whisperX（词级时间戳，可选说话人分离；依赖较重）：
 python3 -m pip install -e ".[whisperx]"
 # 若要作为 MCP 服务使用：
 python3 -m pip install -e ".[mcp]"
@@ -287,7 +292,7 @@ CI 在 GitHub Actions 上对 Linux 和 macOS、Python 3.10 与 3.13 运行 `make
 
 This tool is intended for downloading your own work and content that the platform terms or license allow you to download.
 
-Version 0.4.0 adds MCP tools that return transcript/subtitle text and item metadata (`read_item`, `read_transcript` with character pagination, `search_library`, `get_metadata`); a detachable `media-intake worker` / `serve` so batches keep running after the MCP client exits, plus `submit`, `status`, `cancel`, and `list_batches`; an optional whisperX backend (`pip install 'media-intake[whisperx]'`, `--asr-backend whisperx`) that writes `transcript.words.json` and can label speakers (`--diarize`, HF token from the environment only); cookie diagnostics for Douyin and Xiaohongshu (`cookies check`); and `media-intake import` for files already fetched by an external tool. An optional `media-intake.toml` supplies defaults. See [docs/demo.md](docs/demo.md) for a walkthrough. This tool does not bypass anti-bot checks and does not rotate proxies.
+Version 0.4.1 fixes a Bilibili danmaku conversion failure that could abort an otherwise successful download. Version 0.4.0 added MCP tools that return transcript/subtitle text and item metadata (`read_item`, `read_transcript` with character pagination, `search_library`, `get_metadata`); a detachable `media-intake worker` / `serve` so batches keep running after the MCP client exits, plus `submit`, `status`, `cancel`, and `list_batches`; an optional whisperX backend (`pip install 'media-intake[whisperx]'`, `--asr-backend whisperx`) that writes `transcript.words.json` and can label speakers (`--diarize`, HF token from the environment only); cookie diagnostics for Douyin and Xiaohongshu (`cookies check`); and `media-intake import` for files already fetched by an external tool. An optional `media-intake.toml` supplies defaults. See [docs/demo.md](docs/demo.md) for a walkthrough and [docs/server-deploy.md](docs/server-deploy.md) for Linux cloud and China-region notes. This tool does not bypass anti-bot checks and does not rotate proxies.
 
 Version 0.3.0 added a minimal stdio MCP server (`pip install 'media-intake[mcp]'`, then `media-intake mcp`). Version 0.2.0 added optional offline transcription with faster-whisper (`pip install 'media-intake[whisper]'`). Version 0.1.1 added dedicated Douyin and Xiaohongshu backends (registered before yt-dlp, with yt-dlp fallback). They prefer a mobile UA, parse public share pages, and only use media URLs already present on the page or a public API; they do not rewrite watermarked URLs or generate signing parameters. Livestreams are reported as unsupported.
 

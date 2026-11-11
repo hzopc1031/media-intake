@@ -2,6 +2,12 @@
 
 本项目版本号遵循语义化版本。仓库尚未发布到 PyPI。
 
+## 0.4.1 — 2026-11-11
+
+- 默认排除 B 站弹幕 `danmaku`：yt-dlp 把它当作字幕语言，`--convert-subs srt` 会失败，并把整次下载判为失败（即使媒体文件已经写完）。若明确指定 `--sub-langs danmaku`，则不再做 SRT 转换。
+- 在一台中国大陆 Linux 云服务器上按真实用户路径做了端到端实测，并更新 [docs/demo.md](docs/demo.md)。
+- 新增 [docs/server-deploy.md](docs/server-deploy.md)：在 Linux 云主机上部署，以及中国大陆网络环境下的 GitHub / PyPI / Hugging Face / YouTube / B 站注意事项。
+
 ## 0.4.0 — 2026-11-11
 
 ### MCP 正文与元数据
