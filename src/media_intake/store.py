@@ -25,7 +25,14 @@ CREATE TABLE IF NOT EXISTS jobs (
     transcript_text_path TEXT,
     transcript_model TEXT,
     transcript_language TEXT,
+    transcript_engine TEXT,
+    transcript_words_path TEXT,
+    transcript_diarized INTEGER,
     parent_source TEXT,
+    platform TEXT,
+    uploader TEXT,
+    upload_date TEXT,
+    thumbnail_path TEXT,
     extra_json TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -50,6 +57,13 @@ class JobStore:
                 ("parent_source", "TEXT"),
                 ("transcript_model", "TEXT"),
                 ("transcript_language", "TEXT"),
+                ("transcript_engine", "TEXT"),
+                ("transcript_words_path", "TEXT"),
+                ("transcript_diarized", "INTEGER"),
+                ("platform", "TEXT"),
+                ("uploader", "TEXT"),
+                ("upload_date", "TEXT"),
+                ("thumbnail_path", "TEXT"),
             ):
                 if column not in cols:
                     self._conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {decl}")
@@ -88,9 +102,11 @@ class JobStore:
                     duration_seconds, item_dir, media_path, subtitle_path,
                     subtitle_text_path, subtitle_kind, transcript_path,
                     transcript_text_path, transcript_model, transcript_language,
-                    parent_source, extra_json, created_at, updated_at,
+                    transcript_engine, transcript_words_path, transcript_diarized,
+                    parent_source, platform, uploader, upload_date, thumbnail_path,
+                    extra_json, created_at, updated_at,
                     started_at, finished_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     source=excluded.source,
                     source_kind=excluded.source_kind,
@@ -108,7 +124,14 @@ class JobStore:
                     transcript_text_path=excluded.transcript_text_path,
                     transcript_model=excluded.transcript_model,
                     transcript_language=excluded.transcript_language,
+                    transcript_engine=excluded.transcript_engine,
+                    transcript_words_path=excluded.transcript_words_path,
+                    transcript_diarized=excluded.transcript_diarized,
                     parent_source=excluded.parent_source,
+                    platform=excluded.platform,
+                    uploader=excluded.uploader,
+                    upload_date=excluded.upload_date,
+                    thumbnail_path=excluded.thumbnail_path,
                     extra_json=excluded.extra_json,
                     updated_at=excluded.updated_at,
                     started_at=COALESCE(excluded.started_at, jobs.started_at),
@@ -132,7 +155,14 @@ class JobStore:
                     result.transcript_text_path,
                     result.transcript_model,
                     result.transcript_language,
+                    result.transcript_engine,
+                    result.transcript_words_path,
+                    None if result.transcript_diarized is None else (1 if result.transcript_diarized else 0),
                     result.parent_source,
+                    result.platform,
+                    result.uploader,
+                    result.upload_date,
+                    result.thumbnail_path,
                     None,
                     created,
                     updated_at,
@@ -172,7 +202,20 @@ def _row_to_result(row: sqlite3.Row) -> JobResult:
         transcript_text_path=row["transcript_text_path"],
         transcript_model=row["transcript_model"] if "transcript_model" in keys else None,
         transcript_language=row["transcript_language"] if "transcript_language" in keys else None,
+        transcript_engine=row["transcript_engine"] if "transcript_engine" in keys else None,
+        transcript_words_path=row["transcript_words_path"] if "transcript_words_path" in keys else None,
+        transcript_diarized=_bool_or_none(row["transcript_diarized"]) if "transcript_diarized" in keys else None,
         parent_source=row["parent_source"] if "parent_source" in keys else None,
+        platform=row["platform"] if "platform" in keys else None,
+        uploader=row["uploader"] if "uploader" in keys else None,
+        upload_date=row["upload_date"] if "upload_date" in keys else None,
+        thumbnail_path=row["thumbnail_path"] if "thumbnail_path" in keys else None,
         error=row["error"],
         attempts=row["attempts"],
     )
+
+
+def _bool_or_none(value: object) -> bool | None:
+    if value is None:
+        return None
+    return bool(value)

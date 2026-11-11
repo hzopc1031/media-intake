@@ -48,7 +48,14 @@ class JobResult:
     transcript_text_path: str | None = None
     transcript_model: str | None = None
     transcript_language: str | None = None
+    transcript_engine: str | None = None
+    transcript_words_path: str | None = None
+    transcript_diarized: bool | None = None
     parent_source: str | None = None
+    platform: str | None = None
+    uploader: str | None = None
+    upload_date: str | None = None
+    thumbnail_path: str | None = None
     error: str | None = None
     attempts: int = 0
 

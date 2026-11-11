@@ -68,3 +68,5 @@ class BatchOptions:
             raise ValueError("转写后端 --asr-backend 必须是 faster-whisper 或 whisperx")
         self.asr_backend = backend
         self.diarize = bool(self.diarize)
+        if self.diarize and self.asr_backend != "whisperx":
+            raise ValueError("说话人分离 --diarize 只能与 --asr-backend whisperx 一起使用")

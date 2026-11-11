@@ -90,6 +90,7 @@ def test_doctor_lists_whisper_as_optional() -> None:
 
     text, code = doctor_text()
     assert "faster-whisper" in text
+    assert "whisperx" in text
     assert "mcp" in text
     assert "可选" in text
     # 未安装可选依赖时，只要 ffmpeg / yt-dlp 可用，自检仍应成功

@@ -43,6 +43,8 @@ class TranscriptResult:
     engine: str
     language: str | None = None
     model: str | None = None
+    words_path: Path | None = None
+    diarized: bool = False
 
 
 @runtime_checkable
@@ -244,8 +246,15 @@ def should_transcribe(
 def resolve_transcriber(name: str | None) -> Transcriber | None:
     if name is None or name in {"", "none", "off"}:
         return None
-    if name in {"faster-whisper", "whisper", "faster_whisper"}:
+    normalized = str(name).strip().lower().replace("_", "-")
+    if normalized in {"faster-whisper", "whisper", "fasterwhisper"}:
         if not whisper_is_installed():
             raise DependencyError(WHISPER_INSTALL_HINT)
         return FasterWhisperTranscriber()
-    raise ValueError(f"不支持的转写引擎：{name}。当前可用：faster-whisper")
+    if normalized in {"whisperx", "whisper-x"}:
+        from media_intake.whisperx_backend import WHISPERX_INSTALL_HINT, WhisperXTranscriber, whisperx_is_installed
+
+        if not whisperx_is_installed():
+            raise DependencyError(WHISPERX_INSTALL_HINT)
+        return WhisperXTranscriber()
+    raise ValueError(f"不支持的转写引擎：{name}。当前可用：faster-whisper、whisperx")

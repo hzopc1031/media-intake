@@ -29,6 +29,7 @@ class Library:
         source.txt            # 来源字幕纯文本（如有）
         transcript.srt        # 离线转写（若启用）
         transcript.txt
+        transcript.words.json  # whisperX 词级时间戳（若启用）
         *.info.json           # yt-dlp 元数据（下载模式）
     """
 
@@ -79,7 +80,14 @@ def manifest_record(job: JobResult) -> dict:
         "transcript_text_path": job.transcript_text_path,
         "transcript_model": job.transcript_model,
         "transcript_language": job.transcript_language,
+        "transcript_engine": job.transcript_engine,
+        "transcript_words_path": job.transcript_words_path,
+        "transcript_diarized": job.transcript_diarized,
         "parent_source": job.parent_source,
+        "platform": job.platform,
+        "uploader": job.uploader,
+        "upload_date": job.upload_date,
+        "thumbnail_path": job.thumbnail_path,
         "status": job.status.value,
         "error": job.error,
         "attempts": job.attempts,
@@ -126,7 +134,13 @@ def render_index(jobs: list[JobResult], *, updated_at: str) -> str:
 def _transcript_cell(job: JobResult) -> str:
     if not job.transcript_path:
         return ""
-    extra = [part for part in (job.transcript_model, job.transcript_language) if part]
+    extra = [
+        part
+        for part in (job.transcript_engine, job.transcript_model, job.transcript_language)
+        if part
+    ]
+    if job.transcript_diarized:
+        extra.append("说话人")
     if extra:
         return f"{job.transcript_path}（{', '.join(extra)}）"
     return job.transcript_path

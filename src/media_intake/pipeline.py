@@ -16,11 +16,14 @@ from media_intake.probe import archive_local_file, ffprobe_media
 from media_intake.process import CommandRunner, SubprocessRunner
 from media_intake.store import JobStore
 from media_intake.subtitles import find_sidecar_subtitles, write_plain_text
+from media_intake.metadata import fields_from_info
 from media_intake.transcribe import (
     FasterWhisperTranscriber,
     TranscribeMode,
+    TranscriptResult,
     WHISPER_INSTALL_HINT,
     should_transcribe,
+    whisper_is_installed,
 )
 
 
@@ -334,26 +337,21 @@ def _process_local(
         extra_sources=find_sidecar_subtitles(src_path),
         preferred_langs=_lang_list(options.sub_langs),
     )
-    transcript_path, transcript_text, transcript_model, transcript_language = _maybe_transcribe(
+    produced = _maybe_transcribe(
         media, dest, options, has_source_subs=subtitle_path is not None
     )
-    return JobResult(
-        id=job_id,
-        source=source.raw,
-        source_kind=source.kind,
-        status=JobStatus.SUCCEEDED,
+    return _job_succeeded(
+        job_id,
+        source,
+        library=library,
+        dest=dest,
+        media=media,
         title=title,
-        duration_seconds=meta.get("duration_seconds"),
-        item_dir=library.rel(dest),
-        media_path=library.rel(media),
-        subtitle_path=library.rel(subtitle_path),
-        subtitle_text_path=library.rel(subtitle_text),
-        subtitle_kind=kind,
-        transcript_path=library.rel(transcript_path),
-        transcript_text_path=library.rel(transcript_text),
-        transcript_model=transcript_model,
-        transcript_language=transcript_language,
-        parent_source=source.parent_source,
+        duration=meta.get("duration_seconds"),
+        subtitle_path=subtitle_path,
+        subtitle_text=subtitle_text,
+        kind=kind,
+        produced=produced,
     )
 
 
@@ -382,9 +380,132 @@ def _process_url(
         preferred_langs=_lang_list(options.sub_langs),
         auto_hint=options.write_auto_subs,
     )
-    transcript_path, transcript_text, transcript_model, transcript_language = _maybe_transcribe(
+    produced = _maybe_transcribe(
         media, dest, options, has_source_subs=subtitle_path is not None
     )
+    extra = fields_from_info(info)
+    thumbnail = _pick_thumbnail(dest)
+    return _job_succeeded(
+        job_id,
+        source,
+        library=library,
+        dest=dest,
+        media=media,
+        title=title,
+        duration=duration,
+        subtitle_path=subtitle_path,
+        subtitle_text=subtitle_text,
+        kind=kind,
+        produced=produced,
+        platform=extra.get("platform"),
+        uploader=extra.get("uploader"),
+        upload_date=extra.get("upload_date"),
+        thumbnail_path=library.rel(thumbnail) if thumbnail else None,
+    )
+
+
+
+def _prepare_transcriber(options: BatchOptions) -> None:
+    if options.transcribe_mode is TranscribeMode.NEVER:
+        return
+    if options.transcriber is None:
+        options.transcriber = build_transcriber(options)
+    if not options.transcriber.available():
+        raise DependencyError(_missing_transcriber_hint(options.asr_backend))
+
+
+def build_transcriber(options: BatchOptions):
+    backend = getattr(options, "asr_backend", "faster-whisper") or "faster-whisper"
+    if backend == "whisperx":
+        from media_intake.whisperx_backend import WHISPERX_INSTALL_HINT, WhisperXTranscriber, whisperx_is_installed
+
+        if not whisperx_is_installed():
+            raise DependencyError(WHISPERX_INSTALL_HINT)
+        return WhisperXTranscriber(
+            model=options.whisper_model,
+            device=options.whisper_device,
+            compute_type=options.whisper_compute_type,
+            language=options.whisper_language,
+            diarize=bool(getattr(options, "diarize", False)),
+        )
+    if not whisper_is_installed():
+        raise DependencyError(WHISPER_INSTALL_HINT)
+    return FasterWhisperTranscriber(
+        model=options.whisper_model,
+        device=options.whisper_device,
+        compute_type=options.whisper_compute_type,
+        language=options.whisper_language,
+    )
+
+
+def _missing_transcriber_hint(backend: str) -> str:
+    if backend == "whisperx":
+        from media_intake.whisperx_backend import WHISPERX_INSTALL_HINT
+
+        return WHISPERX_INSTALL_HINT
+    return WHISPER_INSTALL_HINT
+
+
+def _maybe_transcribe(
+    media: Path,
+    dest: Path,
+    options: BatchOptions,
+    *,
+    has_source_subs: bool,
+) -> TranscriptResult | None:
+    if not should_transcribe(
+        options.transcribe_mode,
+        has_source_subs=has_source_subs,
+        media_path=media,
+    ):
+        return None
+    transcriber = options.transcriber
+    if transcriber is None or not transcriber.available():
+        raise JobError(_missing_transcriber_hint(getattr(options, "asr_backend", "faster-whisper")))
+    produced = transcriber.transcribe(media, dest)
+    transcript_path = dest / "transcript.srt"
+    transcript_text = dest / "transcript.txt"
+    if produced.srt_path.resolve() != transcript_path.resolve():
+        transcript_path.write_bytes(produced.srt_path.read_bytes())
+    if produced.text_path.resolve() != transcript_text.resolve():
+        transcript_text.write_bytes(produced.text_path.read_bytes())
+    elif not transcript_text.exists():
+        write_plain_text(transcript_path, transcript_text)
+    words_path = dest / "transcript.words.json"
+    if produced.words_path is not None:
+        if produced.words_path.resolve() != words_path.resolve():
+            words_path.write_bytes(produced.words_path.read_bytes())
+    else:
+        words_path = None
+    return TranscriptResult(
+        srt_path=transcript_path,
+        text_path=transcript_text,
+        engine=produced.engine,
+        language=produced.language,
+        model=produced.model,
+        words_path=words_path,
+        diarized=bool(produced.diarized),
+    )
+
+
+def _job_succeeded(
+    job_id: str,
+    source,
+    *,
+    library: Library,
+    dest: Path,
+    media: Path,
+    title: str | None,
+    duration: float | None,
+    subtitle_path: Path | None,
+    subtitle_text: Path | None,
+    kind,
+    produced: TranscriptResult | None,
+    platform: str | None = None,
+    uploader: str | None = None,
+    upload_date: str | None = None,
+    thumbnail_path: str | None = None,
+) -> JobResult:
     return JobResult(
         id=job_id,
         source=source.raw,
@@ -397,55 +518,28 @@ def _process_url(
         subtitle_path=library.rel(subtitle_path),
         subtitle_text_path=library.rel(subtitle_text),
         subtitle_kind=kind,
-        transcript_path=library.rel(transcript_path),
-        transcript_text_path=library.rel(transcript_text),
-        transcript_model=transcript_model,
-        transcript_language=transcript_language,
+        transcript_path=library.rel(produced.srt_path) if produced else None,
+        transcript_text_path=library.rel(produced.text_path) if produced else None,
+        transcript_model=produced.model if produced else None,
+        transcript_language=produced.language if produced else None,
+        transcript_engine=produced.engine if produced else None,
+        transcript_words_path=library.rel(produced.words_path) if produced and produced.words_path else None,
+        transcript_diarized=produced.diarized if produced else None,
         parent_source=source.parent_source,
+        platform=platform,
+        uploader=uploader,
+        upload_date=upload_date,
+        thumbnail_path=thumbnail_path,
     )
 
 
-
-def _prepare_transcriber(options: BatchOptions) -> None:
-    if options.transcribe_mode is TranscribeMode.NEVER:
-        return
-    if options.transcriber is None:
-        options.transcriber = FasterWhisperTranscriber(
-            model=options.whisper_model,
-            device=options.whisper_device,
-            compute_type=options.whisper_compute_type,
-            language=options.whisper_language,
-        )
-    if not options.transcriber.available():
-        raise DependencyError(WHISPER_INSTALL_HINT)
-
-
-def _maybe_transcribe(
-    media: Path,
-    dest: Path,
-    options: BatchOptions,
-    *,
-    has_source_subs: bool,
-) -> tuple[Path | None, Path | None, str | None, str | None]:
-    if not should_transcribe(
-        options.transcribe_mode,
-        has_source_subs=has_source_subs,
-        media_path=media,
-    ):
-        return None, None, None, None
-    transcriber = options.transcriber
-    if transcriber is None or not transcriber.available():
-        raise JobError(WHISPER_INSTALL_HINT)
-    produced = transcriber.transcribe(media, dest)
-    transcript_path = dest / "transcript.srt"
-    transcript_text = dest / "transcript.txt"
-    if produced.srt_path.resolve() != transcript_path.resolve():
-        transcript_path.write_bytes(produced.srt_path.read_bytes())
-    if produced.text_path.resolve() != transcript_text.resolve():
-        transcript_text.write_bytes(produced.text_path.read_bytes())
-    elif not transcript_text.exists():
-        write_plain_text(transcript_path, transcript_text)
-    return transcript_path, transcript_text, produced.model, produced.language
+def _pick_thumbnail(dest: Path) -> Path | None:
+    for path in sorted(dest.glob("thumbnail.*")) + sorted(dest.glob("*.jpg")) + sorted(dest.glob("*.webp")):
+        if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
+            if path.name.startswith("media."):
+                continue
+            return path
+    return None
 
 
 def _ingest_subtitles(

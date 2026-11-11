@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "media-intake"
 version = "0.3.0"
-description = "Queue permitted media into a local library, with optional offline transcription and a stdio MCP server."
+description = "Queue permitted media into a local library, with optional offline transcription, a stdio MCP server, and a detachable worker."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -30,6 +30,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=7.4", "mcp>=1.0"]
 whisper = ["faster-whisper>=1.0.0"]
+whisperx = ["whisperx>=3.1.0"]
 mcp = ["mcp>=1.0"]
 
 [project.scripts]
@@ -52,4 +53,5 @@ addopts = "-q"
 markers = [
     "online: tests that may download from real platforms (opt-in; skipped unless MEDIA_INTAKE_ONLINE=1)",
     "slow: optional tests that may download a Whisper model (skipped unless MEDIA_INTAKE_WHISPER=1 or the tiny model is already cached)",
+    "whisperx: optional tests that run the real whisperX stack (skipped unless MEDIA_INTAKE_WHISPERX=1)",
 ]
