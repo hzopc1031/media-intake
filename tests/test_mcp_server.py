@@ -41,7 +41,7 @@ async def _wait_status(client: Any, batch_id: str, library: Path, *, timeout: fl
     last: dict[str, Any] | None = None
     while time.monotonic() < deadline:
         last = _payload(await client.call_tool("get_status", {"id": batch_id, "library": str(library)}))
-        if last["status"] in {"succeeded", "completed", "failed"}:
+        if last["status"] in {"succeeded", "completed", "failed", "cancelled"}:
             return last
         await asyncio.sleep(0.05)
     raise AssertionError(f"批次未在时限内结束：{last}")
@@ -89,6 +89,8 @@ def test_tool_handlers_validate_inputs(tmp_path: Path) -> None:
                 "read_transcript",
                 "search_library",
                 "get_metadata",
+                "cancel_batch",
+                "list_batches",
             }
             assert names == expected
             empty = await client.call_tool(
@@ -99,7 +101,7 @@ def test_tool_handlers_validate_inputs(tmp_path: Path) -> None:
             submitted = _payload(
                 await client.call_tool(
                     "submit_batch",
-                    {"items": ["clip.mp4"], "library": str(tmp_path / "lib")},
+                    {"items": ["clip.mp4"], "library": str(tmp_path / "lib"), "detach": False},
                 )
             )
             assert submitted["batch_id"].startswith("batch-")
@@ -125,20 +127,21 @@ def test_tool_handlers_validate_inputs(tmp_path: Path) -> None:
 def test_inprocess_roundtrip_local_media(tmp_path: Path) -> None:
     from mcp import Client
 
+    from media_intake.batches import BatchManager
     from media_intake.mcp_server import create_server
 
     media = generate_sample_media(tmp_path / "clip.mp4")
     sidecar = media.with_suffix(".srt")
     sidecar.write_text("1\n00:00:00,000 --> 00:00:01,000\n本地测试字幕。\n", encoding="utf-8")
     library = tmp_path / "library"
-    server = create_server()
+    server = create_server(BatchManager(detach=False))
 
     async def go() -> None:
         async with Client(server) as client:
             submitted = _payload(
                 await client.call_tool(
                     "submit_batch",
-                    {"items": [str(media)], "library": str(library), "transcribe": "never"},
+                    {"items": [str(media)], "library": str(library), "transcribe": "never", "detach": False},
                 )
             )
             assert submitted["batch_id"].startswith("batch-")

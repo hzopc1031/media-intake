@@ -32,6 +32,9 @@ class BatchOptions:
     whisper_device: str = "auto"
     whisper_compute_type: str = "auto"
     whisper_language: str | None = None
+    asr_backend: str = "faster-whisper"
+    diarize: bool = False
+    cancel_event: object | None = None
 
     def __post_init__(self) -> None:
         self.library_root = Path(self.library_root).expanduser().resolve()
@@ -56,3 +59,12 @@ class BatchOptions:
         if self.whisper_language is not None:
             lang = self.whisper_language.strip()
             self.whisper_language = None if not lang or lang.lower() == "auto" else lang
+        backend = (self.asr_backend or "faster-whisper").strip().lower().replace("_", "-")
+        if backend in {"whisper", "faster-whisper", "fasterwhisper"}:
+            backend = "faster-whisper"
+        elif backend in {"whisperx", "whisper-x"}:
+            backend = "whisperx"
+        else:
+            raise ValueError("转写后端 --asr-backend 必须是 faster-whisper 或 whisperx")
+        self.asr_backend = backend
+        self.diarize = bool(self.diarize)

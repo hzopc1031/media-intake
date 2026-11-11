@@ -17,7 +17,7 @@ MCP_INSTALL_HINT = (
     f"  {sys.executable} -m pip install mcp"
 )
 
-_DEFAULT_MANAGER = BatchManager()
+_DEFAULT_MANAGER = BatchManager(detach=True)
 
 
 def mcp_is_installed() -> bool:
@@ -41,7 +41,7 @@ def create_server(manager: BatchManager | None = None) -> Any:
         instructions=(
             "把获准下载的链接或本地文件排队整理进素材库，并把字幕或转写正文交给模型。"
             "使用 submit_batch 提交一批任务（立即返回 batch_id），"
-            "用 get_status 查询批次或单条结果，"
+            "用 get_status 查询批次或单条结果，用 cancel_batch / list_batches 取消或列出批次，submit_batch 默认只入队，需另开 media-intake worker 处理；传入 detach=false 可在当前进程执行，"
             "用 read_manifest 读取素材库清单，用 read_item 读取条目元数据，"
             "用 read_transcript 按字符分页读取字幕或转写正文，用 search_library 检索素材库，"
             "用 get_metadata 在不下载的情况下探测链接或本地文件。"
@@ -66,11 +66,14 @@ def create_server(manager: BatchManager | None = None) -> Any:
         whisper_device: str = "auto",
         whisper_compute_type: str = "auto",
         whisper_language: str | None = None,
+        asr_backend: str = "faster-whisper",
+        diarize: bool = False,
         concurrency: int = 2,
         retries: int = 3,
         force: bool = False,
+        detach: bool = True,
     ) -> dict[str, Any]:
-        """提交一批链接或本地文件，在后台处理并立即返回批次 ID。"""
+        """提交一批链接或本地文件。默认只写入队列并立即返回 batch_id（detach=true），由 media-intake worker 领取执行；detach=false 时在当前进程的后台线程运行（客户端退出后未完成批次会停）。"""
         return mgr.submit_batch(
             items,
             library,
@@ -87,15 +90,32 @@ def create_server(manager: BatchManager | None = None) -> Any:
             whisper_device=whisper_device,
             whisper_compute_type=whisper_compute_type,
             whisper_language=whisper_language,
+            asr_backend=asr_backend,
+            diarize=diarize,
             concurrency=concurrency,
             retries=retries,
             force=force,
+            detach=detach,
         )
 
     @server.tool()
     def get_status(id: str, library: str | None = None) -> dict[str, Any]:
         """按批次 ID 或条目 ID 查询状态、计数和错误。查询单条条目时需要提供 library。"""
         return mgr.get_status(id, library)
+
+    @server.tool()
+    def cancel_batch(id: str, library: str | None = None) -> dict[str, Any]:
+        """取消尚未结束的批次。排队中的会立即取消；运行中的会尽快停止尚未开始的条目。"""
+        return mgr.cancel_batch(id, library)
+
+    @server.tool()
+    def list_batches(
+        library: str,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """列出素材库中的批次。可用 status 过滤，并用 limit 限制条数。"""
+        return mgr.list_batches(library, status=status, limit=limit)
 
     @server.tool()
     def read_manifest(

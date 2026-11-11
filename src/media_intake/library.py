@@ -139,6 +139,7 @@ def _status_label(status: JobStatus) -> str:
         JobStatus.SKIPPED: "跳过",
         JobStatus.PENDING: "待处理",
         JobStatus.RUNNING: "进行中",
+        JobStatus.CANCELLED: "已取消",
     }.get(status, status.value)
 
 

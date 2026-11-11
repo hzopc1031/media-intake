@@ -65,6 +65,7 @@ def run_batch(
 
     succeeded: list[JobResult] = []
     failed: list[JobResult] = list(expand_failures)
+    cancelled: list[JobResult] = []
 
     def _process(job_id: str, source: Source) -> JobResult:
         return _run_job_with_retry(
@@ -77,6 +78,22 @@ def run_batch(
             backends=backends,
         )
 
+    if to_run and _is_cancelled(options):
+        now = utc_now()
+        for job_id, source in to_run:
+            result = JobResult(
+                id=job_id,
+                source=source.raw,
+                source_kind=source.kind,
+                status=JobStatus.CANCELLED,
+                error="批次已取消",
+                attempts=0,
+                parent_source=source.parent_source,
+            )
+            store.upsert(result, created_at=now, updated_at=now, finished_at=now)
+            cancelled.append(result)
+        to_run = []
+
     if to_run:
         workers = min(options.concurrency, len(to_run))
         with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -85,6 +102,8 @@ def run_batch(
                 result = future.result()
                 if result.status == JobStatus.SUCCEEDED:
                     succeeded.append(result)
+                elif result.status == JobStatus.CANCELLED:
+                    cancelled.append(result)
                 else:
                     failed.append(result)
 
@@ -94,7 +113,8 @@ def run_batch(
     succeeded.sort(key=lambda j: order.get(j.id, 0))
     failed.sort(key=lambda j: (0 if j.id in order else 1, order.get(j.id, 0)))
     skipped.sort(key=lambda j: order.get(j.id, 0))
-    return RunReport(succeeded=succeeded, skipped=skipped, failed=failed)
+    cancelled.sort(key=lambda j: order.get(j.id, 0))
+    return RunReport(succeeded=succeeded, skipped=skipped, failed=failed, cancelled=cancelled)
 
 
 def collect_sources(
@@ -207,6 +227,20 @@ def _run_job_with_retry(
 ) -> JobResult:
     attempts_allowed = options.retries + 1
     last: JobResult | None = None
+    if _is_cancelled(options):
+        now = utc_now()
+        result = JobResult(
+            id=job_id,
+            source=source.raw,
+            source_kind=source.kind,
+            status=JobStatus.CANCELLED,
+            error="批次已取消",
+            attempts=0,
+            parent_source=source.parent_source,
+        )
+        store.upsert(result, created_at=now, updated_at=now, finished_at=now)
+        library.rewrite_outputs(store.list_all(), updated_at=now)
+        return result
     for attempt in range(1, attempts_allowed + 1):
         started = utc_now()
         running = JobResult(
@@ -248,7 +282,13 @@ def _run_job_with_retry(
             store.upsert(last, created_at=started, updated_at=finished, finished_at=finished)
             library.rewrite_outputs(store.list_all(), updated_at=finished)
             if attempt < attempts_allowed:
-                time.sleep(options.retry_wait * (2 ** (attempt - 1)))
+                if _sleep_interruptible(options, options.retry_wait * (2 ** (attempt - 1))):
+                    last.status = JobStatus.CANCELLED
+                    last.error = "批次已取消"
+                    finished = utc_now()
+                    store.upsert(last, created_at=started, updated_at=finished, finished_at=finished)
+                    library.rewrite_outputs(store.list_all(), updated_at=finished)
+                    return last
     assert last is not None
     return last
 
@@ -481,3 +521,20 @@ def _info_duration(info: dict) -> float | None:
         return float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _is_cancelled(options: BatchOptions) -> bool:
+    event = getattr(options, "cancel_event", None)
+    return event is not None and bool(getattr(event, "is_set", lambda: False)())
+
+
+def _sleep_interruptible(options: BatchOptions, seconds: float) -> bool:
+    """等待重试间隔；若批次被取消则立刻返回 True。"""
+    if seconds <= 0:
+        return _is_cancelled(options)
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if _is_cancelled(options):
+            return True
+        time.sleep(min(0.1, max(0.0, deadline - time.time())))
+    return _is_cancelled(options)

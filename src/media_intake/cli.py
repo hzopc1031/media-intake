@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from media_intake import __version__
+from media_intake.batches import BatchManager
 from media_intake.config import BatchOptions
 from media_intake.deps import doctor_text, update_ytdlp
 from media_intake.errors import IntakeError
@@ -55,146 +56,114 @@ def _build_parser() -> argparse.ArgumentParser:
         epilog=LEGAL_NOTE,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    run_p.add_argument("items", nargs="*", help="单条链接或本地路径，可给多项")
-    run_p.add_argument(
-        "-i",
-        "--input",
-        dest="input_file",
-        metavar="FILE",
-        help="文本文件，每行一个链接或本地路径；使用 - 表示从标准输入读取",
+    _add_input_arguments(run_p)
+    _add_batch_arguments(run_p)
+
+    submit_p = sub.add_parser(
+        "submit",
+        help="把一批任务写入队列，交由 worker 在后台处理",
+        description=(
+            "与 run 接受相同的条目和选项，但只把批次写入素材库队列并立即返回 batch_id；"
+            "不会在当前进程里执行下载或转写。"
+            "请另外运行 media-intake worker --library <目录> 领取任务。"
+            "客户端退出后，已入队的批次仍可由 worker 继续处理。\n\n"
+            + LEGAL_NOTE
+        ),
+        epilog=LEGAL_NOTE,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    run_p.add_argument(
+    _add_input_arguments(submit_p)
+    _add_batch_arguments(submit_p)
+
+    worker_p = sub.add_parser(
+        "worker",
+        aliases=["serve"],
+        help="领取并处理素材库中已入队的批次",
+        description=(
+            "独立运行的后台进程：从素材库的 SQLite 队列领取批次并执行。"
+            "MCP 客户端或 media-intake submit 退出后，未完成的批次仍会继续。"
+            "若领取到心跳过期的运行中批次，会当作崩溃回收并重新执行"
+            "（已成功的条目默认仍会跳过）。\n\n"
+            + LEGAL_NOTE
+        ),
+        epilog=LEGAL_NOTE,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    worker_p.add_argument(
         "-L",
         "--library",
         default=DEFAULT_LIBRARY,
         help=f"素材库目录（默认：{DEFAULT_LIBRARY}）",
     )
-    run_p.add_argument(
-        "-j",
-        "--concurrency",
-        type=int,
-        default=2,
-        help="并发数，必须大于等于 1（默认：2）",
+    worker_p.add_argument(
+        "--once",
+        action="store_true",
+        help="最多处理一条批次后退出；若队列为空则立即退出",
     )
-    run_p.add_argument(
-        "--retries",
-        type=int,
-        default=3,
-        help="失败后的重试次数（默认：3，即最多尝试 4 次）",
-    )
-    run_p.add_argument(
-        "--retry-wait",
+    worker_p.add_argument(
+        "--poll-interval",
         type=float,
         default=1.0,
-        help="首次重试前等待的秒数，之后按指数退避（默认：1）",
+        metavar="SEC",
+        help="队列为空时的轮询间隔秒数（默认：1）",
     )
-    run_p.add_argument(
-        "-f",
-        "--format",
-        dest="format",
-        help="传给 yt-dlp 的格式选择器，例如 bv*+ba/b 或 best[height<=720]",
+    worker_p.add_argument(
+        "--stale-after",
+        type=float,
+        default=120.0,
+        metavar="SEC",
+        help="运行中批次的心跳超过该秒数后可被其他 worker 回收（默认：120）",
     )
-    run_p.add_argument(
-        "-x",
-        "--audio-only",
-        action="store_true",
-        help="只提取音频（yt-dlp -x，默认封装为 m4a）",
+
+    status_p = sub.add_parser(
+        "status",
+        help="查询批次或条目状态；省略 ID 时列出批次",
+        description="查询一个批次或条目的状态；若不给 ID，则列出该素材库中的批次。\n\n" + LEGAL_NOTE,
+        epilog=LEGAL_NOTE,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    run_p.add_argument(
-        "--subs",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="是否尝试下载来源字幕（默认开启；--no-subs 关闭）",
+    status_p.add_argument("id", nargs="?", help="批次 ID 或条目 ID")
+    status_p.add_argument(
+        "-L",
+        "--library",
+        default=DEFAULT_LIBRARY,
+        help=f"素材库目录（默认：{DEFAULT_LIBRARY}）",
     )
-    run_p.add_argument(
-        "--sub-langs",
-        help="字幕语言，逗号分隔，例如 zh,en,zh-Hans；默认由 yt-dlp 决定",
-    )
-    run_p.add_argument(
-        "--write-auto-subs",
-        action="store_true",
-        help="在来源字幕之外，同时请求自动生成字幕（若站点提供）",
-    )
-    run_p.add_argument(
-        "--cookies",
-        metavar="FILE",
-        help="Netscape 格式的 cookies 文件，传给 yt-dlp --cookies（不会把文件内容写入日志）",
-    )
-    run_p.add_argument(
-        "--cookies-from-browser",
-        metavar="BROWSER[:PROFILE]",
-        help="从本机浏览器读取 cookies，传给 yt-dlp --cookies-from-browser，例如 chrome 或 chrome:Default",
-    )
-    run_p.add_argument(
-        "--expand",
-        "--playlist",
-        dest="expand",
-        action="store_true",
-        help="展开播放列表或创作者主页，把其中每个视频作为独立队列条目（默认只处理单条，不展开）",
-    )
-    run_p.add_argument(
-        "--max-items",
-        type=int,
-        default=None,
-        metavar="N",
-        help="与 --expand 一起使用，每个输入链接最多展开多少条",
-    )
-    run_p.add_argument(
-        "--ytdlp-option",
-        action="append",
-        default=[],
-        metavar="OPT",
-        help="额外传给 yt-dlp 的单个参数，可重复。可用于登录相关选项，例如 --ytdlp-option --username",
-    )
-    run_p.add_argument(
-        "--transcribe",
-        nargs="?",
-        const="missing",
-        default="never",
-        choices=["never", "missing", "always"],
-        metavar="MODE",
-        help=(
-            "离线转写模式：never 不转写（默认）；"
-            "missing 仅在没有来源字幕时转写；"
-            "always 即使已有来源字幕也转写。"
-            "单独写 --transcribe 等于 missing。"
-            "需要先安装 media-intake[whisper]"
+
+    cancel_p = sub.add_parser(
+        "cancel",
+        help="取消一个尚未结束的批次",
+        description=(
+            "取消排队中或运行中的批次。已排队的会立即标记为 cancelled；"
+            "运行中的会尽快停止尚未开始的条目，正在处理的条目会尽力收尾。\n\n"
+            + LEGAL_NOTE
         ),
+        epilog=LEGAL_NOTE,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    run_p.add_argument(
-        "--whisper-model",
-        default="base",
-        metavar="NAME_OR_PATH",
-        help="faster-whisper 模型名（tiny、base、small、medium、large-v3 等）或本地模型目录（默认：base）",
+    cancel_p.add_argument("id", help="批次 ID")
+    cancel_p.add_argument(
+        "-L",
+        "--library",
+        default=DEFAULT_LIBRARY,
+        help=f"素材库目录（默认：{DEFAULT_LIBRARY}）",
     )
-    run_p.add_argument(
-        "--whisper-device",
-        default="auto",
-        metavar="DEVICE",
-        help="转写设备：auto、cpu 或 cuda（默认：auto）",
+
+    batches_p = sub.add_parser(
+        "batches",
+        help="列出素材库中的批次",
+        description="列出素材库队列里的批次及其状态。\n\n" + LEGAL_NOTE,
+        epilog=LEGAL_NOTE,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    run_p.add_argument(
-        "--whisper-compute-type",
-        default="auto",
-        metavar="TYPE",
-        help="计算类型：auto、int8、float16、float32 等（默认 auto：CPU 用 int8，CUDA 用 float16）",
+    batches_p.add_argument(
+        "-L",
+        "--library",
+        default=DEFAULT_LIBRARY,
+        help=f"素材库目录（默认：{DEFAULT_LIBRARY}）",
     )
-    run_p.add_argument(
-        "--whisper-language",
-        default="auto",
-        metavar="LANG",
-        help="转写语言，例如 en、zh；默认 auto，由模型自动检测",
-    )
-    run_p.add_argument(
-        "--force",
-        action="store_true",
-        help="重新处理素材库中已经成功的条目",
-    )
-    run_p.add_argument(
-        "--reference",
-        action="store_true",
-        help="本地文件优先用硬链接或符号链接入库，不行再复制",
-    )
+    batches_p.add_argument("--status", help="按状态过滤，例如 queued、running、succeeded、cancelled")
+    batches_p.add_argument("--limit", type=int, default=None, help="最多列出多少条")
 
     sub.add_parser(
         "doctor",
@@ -207,7 +176,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "mcp",
         help="以 stdio 方式启动 MCP 服务",
         description=(
-            "启动 stdio MCP 服务器，提供 submit_batch、get_status、read_manifest、read_item、read_transcript、search_library、get_metadata 等工具。"
+            "启动 stdio MCP 服务器，提供 submit_batch、get_status、read_manifest、"
+            "read_item、read_transcript、search_library、get_metadata、"
+            "cancel_batch、list_batches 等工具。"
+            "submit_batch 默认只入队，需另开 media-intake worker 处理；"
+            "也可传入 detach=false 在当前进程的后台线程执行（客户端退出后未完成批次会停）。"
             "需要先安装 media-intake[mcp]。请由 MCP 客户端拉起本命令，不要在终端里交互使用。\n\n"
             + LEGAL_NOTE
         ),
@@ -229,6 +202,163 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _add_input_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("items", nargs="*", help="单条链接或本地路径，可给多项")
+    parser.add_argument(
+        "-i",
+        "--input",
+        dest="input_file",
+        metavar="FILE",
+        help="文本文件，每行一个链接或本地路径；使用 - 表示从标准输入读取",
+    )
+
+
+def _add_batch_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "-L",
+        "--library",
+        default=DEFAULT_LIBRARY,
+        help=f"素材库目录（默认：{DEFAULT_LIBRARY}）",
+    )
+    parser.add_argument(
+        "-j",
+        "--concurrency",
+        type=int,
+        default=2,
+        help="并发数，必须大于等于 1（默认：2）",
+    )
+    parser.add_argument(
+        "--retries",
+        type=int,
+        default=3,
+        help="失败后的重试次数（默认：3，即最多尝试 4 次）",
+    )
+    parser.add_argument(
+        "--retry-wait",
+        type=float,
+        default=1.0,
+        help="首次重试前等待的秒数，之后按指数退避（默认：1）",
+    )
+    parser.add_argument(
+        "-f",
+        "--format",
+        dest="format",
+        help="传给 yt-dlp 的格式选择器，例如 bv*+ba/b 或 best[height<=720]",
+    )
+    parser.add_argument(
+        "-x",
+        "--audio-only",
+        action="store_true",
+        help="只提取音频（yt-dlp -x，默认封装为 m4a）",
+    )
+    parser.add_argument(
+        "--subs",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="是否尝试下载来源字幕（默认开启；--no-subs 关闭）",
+    )
+    parser.add_argument(
+        "--sub-langs",
+        help="字幕语言，逗号分隔，例如 zh,en,zh-Hans；默认由 yt-dlp 决定",
+    )
+    parser.add_argument(
+        "--write-auto-subs",
+        action="store_true",
+        help="在来源字幕之外，同时请求自动生成字幕（若站点提供）",
+    )
+    parser.add_argument(
+        "--cookies",
+        metavar="FILE",
+        help="Netscape 格式的 cookies 文件，传给 yt-dlp --cookies（不会把文件内容写入日志）",
+    )
+    parser.add_argument(
+        "--cookies-from-browser",
+        metavar="BROWSER[:PROFILE]",
+        help="从本机浏览器读取 cookies，传给 yt-dlp --cookies-from-browser，例如 chrome 或 chrome:Default",
+    )
+    parser.add_argument(
+        "--expand",
+        "--playlist",
+        dest="expand",
+        action="store_true",
+        help="展开播放列表或创作者主页，把其中每个视频作为独立队列条目（默认只处理单条，不展开）",
+    )
+    parser.add_argument(
+        "--max-items",
+        type=int,
+        default=None,
+        metavar="N",
+        help="与 --expand 一起使用，每个输入链接最多展开多少条",
+    )
+    parser.add_argument(
+        "--ytdlp-option",
+        action="append",
+        default=[],
+        metavar="OPT",
+        help="额外传给 yt-dlp 的单个参数，可重复。可用于登录相关选项，例如 --ytdlp-option --username",
+    )
+    parser.add_argument(
+        "--transcribe",
+        nargs="?",
+        const="missing",
+        default="never",
+        choices=["never", "missing", "always"],
+        metavar="MODE",
+        help=(
+            "离线转写模式：never 不转写（默认）；"
+            "missing 仅在没有来源字幕时转写；"
+            "always 即使已有来源字幕也转写。"
+            "单独写 --transcribe 等于 missing。"
+            "需要先安装 media-intake[whisper] 或 [whisperx]"
+        ),
+    )
+    parser.add_argument(
+        "--asr-backend",
+        default="faster-whisper",
+        choices=["faster-whisper", "whisperx"],
+        help="转写后端：faster-whisper（默认，轻量）或 whisperx（词级时间戳，可选说话人分离）",
+    )
+    parser.add_argument(
+        "--diarize",
+        action="store_true",
+        help="在 whisperX 后端上启用说话人分离（需要环境变量中的 Hugging Face 令牌，不会写入仓库）",
+    )
+    parser.add_argument(
+        "--whisper-model",
+        default="base",
+        metavar="NAME_OR_PATH",
+        help="转写模型名（tiny、base、small、medium、large-v3 等）或本地模型目录（默认：base）",
+    )
+    parser.add_argument(
+        "--whisper-device",
+        default="auto",
+        metavar="DEVICE",
+        help="转写设备：auto、cpu 或 cuda（默认：auto）",
+    )
+    parser.add_argument(
+        "--whisper-compute-type",
+        default="auto",
+        metavar="TYPE",
+        help="计算类型：auto、int8、float16、float32 等（默认 auto：CPU 用 int8，CUDA 用 float16）",
+    )
+    parser.add_argument(
+        "--whisper-language",
+        default="auto",
+        metavar="LANG",
+        help="转写语言，例如 en、zh；默认 auto，由模型自动检测",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="重新处理素材库中已经成功的条目",
+    )
+    parser.add_argument(
+        "--reference",
+        action="store_true",
+        help="本地文件优先用硬链接或符号链接入库，不行再复制",
+    )
+
+
 def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "doctor":
         text, code = doctor_text()
@@ -244,35 +374,23 @@ def _dispatch(args: argparse.Namespace) -> int:
         return run_stdio()
     if args.command == "run":
         return _cmd_run(args)
+    if args.command == "submit":
+        return _cmd_submit(args)
+    if args.command in {"worker", "serve"}:
+        return _cmd_worker(args)
+    if args.command == "status":
+        return _cmd_status(args)
+    if args.command == "cancel":
+        return _cmd_cancel(args)
+    if args.command == "batches":
+        return _cmd_batches(args)
     raise AssertionError(f"未知命令：{args.command}")
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
     try:
         items = _collect_items(args)
-        options = BatchOptions(
-            library_root=Path(args.library),
-            concurrency=args.concurrency,
-            retries=args.retries,
-            retry_wait=args.retry_wait,
-            format=args.format,
-            audio_only=args.audio_only,
-            write_subs=args.subs,
-            sub_langs=args.sub_langs,
-            write_auto_subs=args.write_auto_subs,
-            cookies_file=Path(args.cookies) if args.cookies else None,
-            cookies_from_browser=args.cookies_from_browser,
-            extra_ytdlp_args=list(args.ytdlp_option or []),
-            force=args.force,
-            reference_local=args.reference,
-            expand=args.expand,
-            max_items=args.max_items,
-            transcribe_mode=args.transcribe,
-            whisper_model=args.whisper_model,
-            whisper_device=args.whisper_device,
-            whisper_compute_type=args.whisper_compute_type,
-            whisper_language=args.whisper_language,
-        )
+        options = _options_from_args(args)
     except ValueError as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 2
@@ -285,6 +403,178 @@ def _cmd_run(args: argparse.Namespace) -> int:
     print(f"清单：{options.library_root / 'manifest.jsonl'}")
     print(f"索引：{options.library_root / 'index.md'}")
     return report.exit_code
+
+
+def _cmd_submit(args: argparse.Namespace) -> int:
+    try:
+        items = _collect_items(args)
+        options = _options_from_args(args)
+    except ValueError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 2
+    if options.cookies_file is not None and not options.cookies_file.is_file():
+        print(f"错误：找不到 cookies 文件：{options.cookies_file}", file=sys.stderr)
+        return 2
+    manager = BatchManager(detach=True)
+    submitted = manager.submit_batch(items, str(options.library_root), **_submit_kwargs(args), detach=True)
+    print(f"已入队：{submitted['batch_id']}")
+    print(f"状态：{submitted['status']}")
+    print(f"条目：{submitted['item_count']}")
+    print(f"素材库：{submitted['library']}")
+    print(f"请运行：media-intake worker --library {submitted['library']}")
+    return 0
+
+
+def _cmd_worker(args: argparse.Namespace) -> int:
+    from media_intake.worker import run_worker
+
+    if args.poll_interval < 0 or args.stale_after < 0:
+        print("错误：--poll-interval 与 --stale-after 不能为负数", file=sys.stderr)
+        return 2
+    library = Path(args.library).expanduser().resolve()
+    if args.once:
+        print(f"worker 正在检查队列：{library}", file=sys.stderr)
+    else:
+        print(f"worker 已启动，正在监听：{library}", file=sys.stderr)
+    return run_worker(
+        library,
+        once=args.once,
+        poll_interval=args.poll_interval,
+        stale_after=args.stale_after,
+    )
+
+
+def _cmd_status(args: argparse.Namespace) -> int:
+    manager = BatchManager()
+    if not args.id:
+        result = manager.list_batches(args.library)
+        print(_format_batch_list(result), end="")
+        return 0
+    result = manager.get_status(args.id, args.library)
+    print(_format_status(result), end="")
+    return 0
+
+
+def _cmd_cancel(args: argparse.Namespace) -> int:
+    manager = BatchManager()
+    result = manager.cancel_batch(args.id, args.library)
+    print(_format_status(result), end="")
+    return 0
+
+
+def _cmd_batches(args: argparse.Namespace) -> int:
+    manager = BatchManager()
+    result = manager.list_batches(args.library, status=args.status, limit=args.limit)
+    print(_format_batch_list(result), end="")
+    return 0
+
+
+def _options_from_args(args: argparse.Namespace) -> BatchOptions:
+    return BatchOptions(
+        library_root=Path(args.library),
+        concurrency=args.concurrency,
+        retries=args.retries,
+        retry_wait=args.retry_wait,
+        format=args.format,
+        audio_only=args.audio_only,
+        write_subs=args.subs,
+        sub_langs=args.sub_langs,
+        write_auto_subs=args.write_auto_subs,
+        cookies_file=Path(args.cookies) if args.cookies else None,
+        cookies_from_browser=args.cookies_from_browser,
+        extra_ytdlp_args=list(args.ytdlp_option or []),
+        force=args.force,
+        reference_local=args.reference,
+        expand=args.expand,
+        max_items=args.max_items,
+        transcribe_mode=args.transcribe,
+        whisper_model=args.whisper_model,
+        whisper_device=args.whisper_device,
+        whisper_compute_type=args.whisper_compute_type,
+        whisper_language=args.whisper_language,
+        asr_backend=args.asr_backend,
+        diarize=args.diarize,
+    )
+
+
+def _submit_kwargs(args: argparse.Namespace) -> dict:
+    return {
+        "format": args.format,
+        "audio_only": args.audio_only,
+        "subs": args.subs,
+        "sub_langs": args.sub_langs,
+        "write_auto_subs": args.write_auto_subs,
+        "transcribe": args.transcribe,
+        "cookies": args.cookies,
+        "cookies_from_browser": args.cookies_from_browser,
+        "extra_ytdlp_args": list(args.ytdlp_option or []),
+        "expand": args.expand,
+        "max_items": args.max_items,
+        "whisper_model": args.whisper_model,
+        "whisper_device": args.whisper_device,
+        "whisper_compute_type": args.whisper_compute_type,
+        "whisper_language": args.whisper_language,
+        "asr_backend": args.asr_backend,
+        "diarize": args.diarize,
+        "concurrency": args.concurrency,
+        "retries": args.retries,
+        "retry_wait": args.retry_wait,
+        "force": args.force,
+        "reference_local": args.reference,
+    }
+
+
+def _format_status(result: dict) -> str:
+    if result.get("kind") == "item":
+        lines = [
+            f"条目 {result.get('id')}",
+            f"状态：{result.get('status')}",
+            f"标题：{result.get('title') or '（无标题）'}",
+            f"来源：{result.get('source')}",
+        ]
+        if result.get("error"):
+            lines.append(f"错误：{result['error']}")
+        if result.get("media_path"):
+            lines.append(f"媒体：{result['media_path']}")
+        lines.append("")
+        return "\n".join(lines)
+    return _format_one_batch(result) + "\n"
+
+
+def _format_one_batch(result: dict) -> str:
+    lines = [
+        f"批次 {result.get('batch_id')}",
+        f"状态：{result.get('status')}",
+        f"素材库：{result.get('library')}",
+        f"条目：{result.get('item_count')}",
+    ]
+    counts = result.get("counts") or {}
+    if counts:
+        parts = [f"{key} {counts[key]}" for key in ("succeeded", "skipped", "failed", "cancelled", "total") if key in counts]
+        if parts:
+            lines.append("计数：" + "，".join(parts))
+    if result.get("cancel_requested"):
+        lines.append("已请求取消。")
+    if result.get("error"):
+        lines.append(f"错误：{result['error']}")
+    jobs = result.get("jobs") or []
+    if jobs:
+        lines.append("任务：")
+        for job in jobs:
+            err = f"：{job['error']}" if job.get("error") else ""
+            lines.append(f"  - [{job.get('id')}] {job.get('status')} {job.get('title') or job.get('source')}{err}")
+    return "\n".join(lines)
+
+
+def _format_batch_list(result: dict) -> str:
+    records = result.get("records") or []
+    if not records:
+        return f"素材库 {result.get('library')} 中没有批次。\n"
+    lines = [f"素材库 {result.get('library')} 共 {result.get('count')} 个批次：", ""]
+    for rec in records:
+        lines.append(_format_one_batch(rec))
+        lines.append("")
+    return "\n".join(lines)
 
 
 def _collect_items(args: argparse.Namespace) -> list[str]:

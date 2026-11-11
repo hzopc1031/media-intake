@@ -41,6 +41,8 @@ def test_run_help_lists_legal_note_and_new_flags() -> None:
     assert "--whisper-device" in text
     assert "--whisper-compute-type" in text
     assert "--whisper-language" in text
+    assert "--asr-backend" in text
+    assert "--diarize" in text
 
 
 def test_root_help_contains_legal_note() -> None:
@@ -52,6 +54,9 @@ def test_root_help_contains_legal_note() -> None:
     text = buf.getvalue()
     assert LEGAL_NOTE in text
     assert "mcp" in text
+    assert "worker" in text
+    assert "submit" in text
+    assert "cancel" in text
 
 
 def test_missing_cookies_file_returns_error(tmp_path: Path) -> None:
@@ -84,3 +89,6 @@ def test_mcp_help_lists_tools() -> None:
     assert "read_transcript" in text
     assert "search_library" in text
     assert "get_metadata" in text
+    assert "cancel_batch" in text
+    assert "list_batches" in text
+    assert "worker" in text

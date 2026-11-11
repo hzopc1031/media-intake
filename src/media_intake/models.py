@@ -15,6 +15,7 @@ class JobStatus(str, Enum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     SKIPPED = "skipped"
+    CANCELLED = "cancelled"
 
 
 class SubtitleKind(str, Enum):
@@ -57,7 +58,8 @@ class RunReport:
     succeeded: list[JobResult] = field(default_factory=list)
     skipped: list[JobResult] = field(default_factory=list)
     failed: list[JobResult] = field(default_factory=list)
+    cancelled: list[JobResult] = field(default_factory=list)
 
     @property
     def exit_code(self) -> int:
-        return 1 if self.failed else 0
+        return 1 if self.failed or self.cancelled else 0

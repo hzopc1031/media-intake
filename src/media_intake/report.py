@@ -6,7 +6,7 @@ from media_intake.models import JobResult, RunReport
 def format_report(report: RunReport) -> str:
     lines = [
         "运行报告",
-        f"  成功：{len(report.succeeded)}    跳过：{len(report.skipped)}    失败：{len(report.failed)}",
+        f"  成功：{len(report.succeeded)}    跳过：{len(report.skipped)}    失败：{len(report.failed)}    取消：{len(report.cancelled)}",
     ]
     if report.succeeded:
         lines.append("")
@@ -22,6 +22,11 @@ def format_report(report: RunReport) -> str:
         lines.append("")
         lines.append("失败：")
         for job in report.failed:
+            lines.extend(_item_lines(job, include_error=True))
+    if report.cancelled:
+        lines.append("")
+        lines.append("取消：")
+        for job in report.cancelled:
             lines.extend(_item_lines(job, include_error=True))
     lines.append("")
     return "\n".join(lines)
