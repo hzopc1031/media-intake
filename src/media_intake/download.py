@@ -12,6 +12,27 @@ from media_intake.redact import format_redacted_command, redact_error_text
 DEFAULT_TIMEOUT = 60 * 30
 
 
+
+def subtitle_langs_for_ytdlp(sub_langs: str | None) -> tuple[str, bool]:
+    """Return (--sub-langs value, whether to pass --convert-subs srt).
+
+    yt-dlp exposes Bilibili danmaku (comment XML) as a subtitle language
+    named "danmaku". Converting that XML with --convert-subs srt fails
+    ("Invalid data found when processing input") and aborts the whole
+    download even when the media file itself was written. Danmaku is
+    excluded by default. If the caller explicitly requests danmaku,
+    conversion is skipped so the XML can be saved without failing the job.
+    """
+    tokens = [part.strip() for part in (sub_langs or "all").split(",") if part.strip()]
+    if not tokens:
+        tokens = ["all"]
+    lowered = [token.lower() for token in tokens]
+    wants_danmaku = "danmaku" in lowered
+    if not wants_danmaku and "-danmaku" not in lowered:
+        tokens.append("-danmaku")
+    return ",".join(tokens), not wants_danmaku
+
+
 def build_ytdlp_argv(
     ytdlp: Path,
     url: str,
@@ -37,9 +58,11 @@ def build_ytdlp_argv(
     if options.audio_only:
         argv.extend(["-x", "--audio-format", "m4a", "--audio-quality", "0"])
     if options.write_subs:
-        argv.extend(["--write-subs", "--convert-subs", "srt"])
-        if options.sub_langs:
-            argv.extend(["--sub-langs", options.sub_langs])
+        argv.extend(["--write-subs"])
+        langs, convert = subtitle_langs_for_ytdlp(options.sub_langs)
+        if convert:
+            argv.extend(["--convert-subs", "srt"])
+        argv.extend(["--sub-langs", langs])
         if options.write_auto_subs:
             argv.append("--write-auto-subs")
     if options.cookies_file is not None:

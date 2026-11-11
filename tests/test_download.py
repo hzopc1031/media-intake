@@ -36,7 +36,7 @@ def test_download_argv_defaults_and_options(tmp_path: Path) -> None:
     assert "-x" in argv
     assert "--write-subs" in argv
     assert "--convert-subs" in argv
-    assert argv[argv.index("--sub-langs") + 1] == "zh,en"
+    assert argv[argv.index("--sub-langs") + 1] == "zh,en,-danmaku"
     assert "--write-auto-subs" in argv
     assert argv[argv.index("--cookies") + 1] == str(cookies)
     assert argv[argv.index("--cookies-from-browser") + 1] == "chrome:Default"
@@ -75,3 +75,35 @@ def test_expand_argv_includes_limit_and_cookies(tmp_path: Path) -> None:
     assert argv[argv.index("--cookies-from-browser") + 1] == "firefox"
     assert "--no-playlist" not in argv
     assert argv[-1] == "https://example.com/playlist/1"
+
+def test_write_subs_excludes_danmaku_by_default(tmp_path: Path) -> None:
+    argv = build_ytdlp_argv(
+        Path("yt-dlp"),
+        "https://example.com/a",
+        tmp_path,
+        _options(tmp_path, write_subs=True),
+    )
+    assert "--write-subs" in argv
+    assert "--convert-subs" in argv
+    assert argv[argv.index("--sub-langs") + 1] == "all,-danmaku"
+
+
+def test_explicit_danmaku_skips_convert_subs(tmp_path: Path) -> None:
+    argv = build_ytdlp_argv(
+        Path("yt-dlp"),
+        "https://example.com/a",
+        tmp_path,
+        _options(tmp_path, write_subs=True, sub_langs="danmaku"),
+    )
+    assert "--write-subs" in argv
+    assert "--convert-subs" not in argv
+    assert argv[argv.index("--sub-langs") + 1] == "danmaku"
+
+
+def test_already_excluded_danmaku_is_not_duplicated(tmp_path: Path) -> None:
+    from media_intake.download import subtitle_langs_for_ytdlp
+
+    langs, convert = subtitle_langs_for_ytdlp("all,-danmaku")
+    assert langs == "all,-danmaku"
+    assert convert is True
+

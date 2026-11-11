@@ -320,7 +320,7 @@ def _add_batch_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--sub-langs",
-        help="字幕语言，逗号分隔，例如 zh,en,zh-Hans；默认由 yt-dlp 决定",
+        help="字幕语言，逗号分隔，例如 zh,en,zh-Hans。默认相当于 all，并排除 B 站弹幕 danmaku（否则 --convert-subs srt 可能把整次下载判失败）",
     )
     parser.add_argument(
         "--write-auto-subs",
