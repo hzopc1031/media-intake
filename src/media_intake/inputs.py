@@ -10,7 +10,14 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from media_intake.errors import InputError
 from media_intake.models import Source, SourceKind
 
+_TRAILING_PUNCT = ')。,，]、}\'"'
 _URL_IN_TEXT = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+_BARE_SHARE = re.compile(
+    r'(?<![\w./])((?:v\.douyin\.com|www\.douyin\.com|www\.iesdouyin\.com|'
+    r'xhslink\.(?:com|cn)|www\.xiaohongshu\.com|www\.rednote\.com)/[^\s<>]+)',
+    re.IGNORECASE,
+)
+
 _TRACKING_QUERY_KEYS = {
     "utm_source",
     "utm_medium",
@@ -91,7 +98,10 @@ def _maybe_extract_url(text: str) -> str | None:
         return text.split()[0]
     match = _URL_IN_TEXT.search(text)
     if match:
-        return match.group(0).rstrip(")。,，]、}'\"")
+        return match.group(0).rstrip(_TRAILING_PUNCT)
+    bare = _BARE_SHARE.search(text)
+    if bare:
+        return "https://" + bare.group(1).rstrip(_TRAILING_PUNCT)
     return None
 
 

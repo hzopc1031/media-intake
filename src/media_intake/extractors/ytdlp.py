@@ -8,7 +8,7 @@ from media_intake.download import download_url
 from media_intake.errors import JobError
 from media_intake.extractors.base import ExtractedItem
 from media_intake.process import CommandRunner
-from media_intake.redact import redact_argv
+from media_intake.redact import format_redacted_command, redact_error_text
 
 EXPAND_TIMEOUT = 60 * 10
 
@@ -47,7 +47,7 @@ class YtDlpBackend:
             reason = _short_error(result.stderr or result.stdout)
             raise JobError(
                 "展开播放列表或主页失败（命令："
-                + " ".join(redact_argv(argv[:-1]) + ["<url>"])
+                + format_redacted_command(argv)
                 + f"）：{reason}"
             )
         items = parse_flat_entries(result.stdout, max_items=max_items)
@@ -147,5 +147,5 @@ def _short_error(text: str) -> str:
         return "无错误输出"
     for line in reversed(lines):
         if "ERROR" in line.upper():
-            return line[:500]
-    return lines[-1][:500]
+            return redact_error_text(line[:500])
+    return redact_error_text(lines[-1][:500])

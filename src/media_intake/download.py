@@ -6,7 +6,7 @@ from pathlib import Path
 from media_intake.config import BatchOptions
 from media_intake.errors import JobError
 from media_intake.process import CommandRunner
-from media_intake.redact import redact_argv
+from media_intake.redact import format_redacted_command, redact_error_text
 
 # 下载超时按单条任务计，足够长以覆盖普通视频；测试可注入更小值。
 DEFAULT_TIMEOUT = 60 * 30
@@ -69,7 +69,7 @@ def download_url(
         reason = _short_error(result.stderr or result.stdout)
         raise JobError(
             "yt-dlp 下载失败（命令："
-            + " ".join(redact_argv(argv[:-1]) + ["<url>"])
+            + format_redacted_command(argv)
             + f"）：{reason}"
         )
     info = _read_info_json(dest_dir)
@@ -96,8 +96,8 @@ def _short_error(text: str) -> str:
     for line in reversed(lines):
         upper = line.upper()
         if "ERROR" in upper or "ERROR:" in upper:
-            return line[:500]
-    return lines[-1][:500]
+            return redact_error_text(line[:500])
+    return redact_error_text(lines[-1][:500])
 
 
 def pick_media_file(dest_dir: Path) -> Path | None:
@@ -140,10 +140,21 @@ def pick_media_file(dest_dir: Path) -> Path | None:
         ".ogg",
         ".flac",
         ".aac",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".gif",
     }
     preferred = [p for p in candidates if p.suffix.lower() in media_ext]
     pool = preferred or candidates
-    return max(pool, key=lambda p: p.stat().st_size)
+    named = [p for p in pool if p.stem == "media" or p.stem.startswith("media-")]
+    chosen = named or pool
+    # 优先固定的 media.*，否则取最大文件
+    exact = [p for p in chosen if p.stem == "media"]
+    if exact:
+        return exact[0]
+    return max(chosen, key=lambda p: p.stat().st_size)
 
 
 def pick_subtitle_files(dest_dir: Path) -> list[Path]:

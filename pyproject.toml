@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "media-intake"
-version = "0.1.0"
+version = "0.1.1"
 description = "Queue permitted media links or local files into a material library with source subtitles."
 readme = "README.md"
 license = "MIT"

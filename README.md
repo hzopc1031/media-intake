@@ -4,7 +4,7 @@
 
 本工具用于下载你自己的作品，以及平台条款或许可证允许下载的内容。
 
-当前版本是 **0.1.0（第一步）**：完成队列、下载或本地归档、来源字幕、素材库和依赖自检。离线转写（faster-whisper）和 stdio MCP 服务计划在后续版本提供，本版本已留好调用接口，但尚未实现。
+当前版本是 **0.1.1**：在第一步基础上，已接入抖音和小红书的专用提取后端（按 URL 优先于 yt-dlp）。离线转写（faster-whisper）和 stdio MCP 服务计划在后续版本提供，本版本已留好调用接口，但尚未实现。
 
 ---
 
@@ -13,12 +13,12 @@
 1. 读取命令行、文本文件或标准输入中的条目，每行一个 `http(s)` 链接或本地路径。
 2. 按可配置的并发数排队处理；失败按指数退避重试；状态存在素材库内的 SQLite 中，再次运行会跳过已经成功的条目。
 3. 批量选项在整个队列上生效：格式/清晰度、只提取音频、是否下载字幕、字幕语言。可以传入 Netscape 格式的 cookies 文件（`yt-dlp --cookies`），也可以用 `--cookies-from-browser BROWSER[:PROFILE]` 从本机浏览器读取 cookies。
-4. 链接默认走本机已安装的 [yt-dlp](https://github.com/yt-dlp/yt-dlp)（Unlicense），并带 `--no-playlist`（只处理单条）和 `--ignore-config`（避免本机 yt-dlp 配置在不知情的情况下改变行为）。加上 `--expand`（别名 `--playlist`）时，会把播放列表或创作者主页展开成一条条独立的队列任务，可选 `--max-items` 限制每个输入链接展开的数量；再次运行时按单条视频跳过已完成项。站点专用解析器（计划中的抖音、小红书后端）按 URL 选择，本版本尚未实现，相关链接仍走 yt-dlp。
+4. 链接按站点选择后端。抖音（含 `v.douyin.com`、`iesdouyin.com` 分享页）和小红书（含 `xhslink.com` / `xhslink.cn`、国际站 `rednote.com`，以及图文笔记）会先走专用解析器：优先用移动端 UA 读取公开分享页里已有的嵌入数据，下载页面或公开接口已经提供的视频或图片地址；若页面单独给了 `download_addr`，会优先用它，**不会**改写播放地址去绕水印，也**不会**生成 X-Bogus、a_bogus、x-s 等签名参数。直播间会明确提示暂不支持。抖音桌面网页常返回脚本壳，公开的 `iteminfo` 接口也常因缺少签名（例如 `encrypt_data_miss`）而不可用；小红书短链则可能落到安全校验页或登录页。这些情况下专用后端会失败并回退到 yt-dlp。提供 `--cookies` 或 `--cookies-from-browser` 时，专用后端和 yt-dlp 都会带上。解析失败时回退到 [yt-dlp](https://github.com/yt-dlp/yt-dlp)（Unlicense），并记录两侧错误。其他站点直接走 yt-dlp。yt-dlp 调用默认带 `--no-playlist` 和 `--ignore-config`。加上 `--expand`（别名 `--playlist`）时，若专用后端能从公开主页里读到作品列表，会拆成独立队列条目；否则会明确提示「暂不支持展开」，并再尝试 yt-dlp。可选 `--max-items`。再次运行时按单条跳过已完成项。
 5. 优先保存平台或文件自带的来源字幕，写成 `source.srt` 和对应纯文本 `source.txt`。没有字幕时，本版本如实记录「无来源字幕」，不会假装成功生成了字幕。
 6. 本地文件模式与下载模式一样完整：用 `ffprobe` 读取时长和标题，把文件复制（或按选项链接）进素材库，并收录同目录下的侧车字幕。
 7. 运行结束打印报告（成功 / 跳过 / 失败及原因）。只要有失败，进程退出码不为 0。
 
-下载能否成功，取决于本机 yt-dlp 对那个站点的支持和你是否有权下载该内容。本工具**不自带**任何站点专用解析器，也不保证某个平台一定能用。
+下载能否成功，取决于目标页面是否仍嵌入可解析数据、本机 yt-dlp 对那个站点的支持，以及你是否有权下载该内容。平台反爬、签名校验或登录墙都可能导致专用后端和 yt-dlp 同时失败，这不是保证可下载的工具。
 
 ## 安装
 
@@ -114,7 +114,7 @@ media-library/
 - **浏览器 cookies：** `--cookies-from-browser BROWSER[:PROFILE]`，直接传给 yt-dlp，例如 `chrome`、`firefox`、`chrome:Default`。本工具不保存、不打印浏览器里的 cookie 内容。
 - **额外参数：** `--ytdlp-option` 可把单个参数原样传给 yt-dlp（可重复）。排在本工具默认参数之后，因此可以覆盖它们。
 - **展开：** 默认不展开播放列表或主页。`--expand`（别名 `--playlist`）把其中每个视频变成独立队列条目，可选 `--max-items N` 限制每个输入链接展开的数量。断点续跑和跳过按单条视频计算。
-- **站点后端：** 下载与展开通过 `media_intake.extractors` 的可插拔接口按 URL 选择后端。默认后端是 yt-dlp。抖音和小红书的专用解析器已留好匹配规则和接口，本版本尚未实现，也未注册；这些链接目前仍走 yt-dlp。
+- **站点后端：** 下载与展开通过 `media_intake.extractors` 按 URL 选择后端。抖音、小红书专用解析器排在 yt-dlp 之前；失败时回退到 yt-dlp。专用解析器只读取公开页或公开接口已经给出的地址，不绕签名、不轮换代理。创作者主页的 `--expand` 仅在公开页已嵌入作品列表时可用。
 - 本工具不提供代理轮换。
 
 ## 测试
@@ -134,7 +134,7 @@ MEDIA_INTAKE_ONLINE=1 make test-online
 MEDIA_INTAKE_ONLINE=1 python3 -m pytest -m online
 ```
 
-可把要测的链接放在环境变量 `MEDIA_INTAKE_ONLINE_URL` 中。只有你确认该链接允许下载时才运行。
+可把要测的链接放在环境变量 `MEDIA_INTAKE_ONLINE_URL`、`MEDIA_INTAKE_ONLINE_DOUYIN_URL` 或 `MEDIA_INTAKE_ONLINE_XHS_URL` 中。只有你确认该链接允许下载时才运行。平台反爬或签名校验失败时，这些测试会失败并留下错误信息，这是预期现象，不要把它写成离线夹具。
 
 CI 在 GitHub Actions 上对 Linux 和 macOS、Python 3.10 与 3.13 运行 `make test`。Windows 作为尽力支持，不提供安装包。
 
@@ -152,6 +152,6 @@ CI 在 GitHub Actions 上对 Linux 和 macOS、Python 3.10 与 3.13 运行 `make
 
 This tool is intended for downloading your own work and content that the platform terms or license allow you to download.
 
-Version 0.1.0 is step 1: queueing (concurrency, retries with exponential backoff, resumable SQLite state), per-batch format / audio-only / subtitle options, source subtitles as SRT and plain text, local-file archiving via ffprobe, a run report with a non-zero exit on failure, `doctor` / `update-yt-dlp`, `--cookies` and `--cookies-from-browser`, and optional `--expand` / `--playlist` (with `--max-items`) that turns a profile or playlist into individual queue items. Offline transcription and a stdio MCP server are planned next; hooks exist, implementations do not. Dedicated Douyin and Xiaohongshu parsers are also planned: the extractor interface is in place, those backends are not registered yet, and such URLs currently go through yt-dlp. Proxy rotation is not provided.
+Version 0.1.1 adds dedicated Douyin and Xiaohongshu backends (registered before yt-dlp, with yt-dlp fallback). They prefer a mobile UA, parse public share pages, and only use media URLs already present on the page or a public API; they do not rewrite watermarked URLs or generate signing parameters. Livestreams are reported as unsupported. Douyin's desktop shell and unsigned iteminfo API, and Xiaohongshu's security-check or login pages, are treated as failures and fall back to yt-dlp. Profile expansion works only if the public page already embeds a work list; otherwise it is reported as unsupported and yt-dlp may be tried. Step 1 also includes queueing, per-batch options, source subtitles, local-file archiving, `doctor` / `update-yt-dlp`, `--cookies` and `--cookies-from-browser`. Offline transcription and a stdio MCP server are still planned. Proxy rotation is not provided.
 
 Install ffmpeg yourself, then `python3 -m pip install -e .`. The project is not on PyPI yet. Run `media-intake doctor` to check ffmpeg and yt-dlp, and `media-intake run --help` for options (help text is in Chinese). Cookie files are gitignored and never logged. Default tests (`make test`) and CI stay offline. Optional live-platform tests are `MEDIA_INTAKE_ONLINE=1 make test-online`.

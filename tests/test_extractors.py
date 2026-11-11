@@ -1,40 +1,19 @@
 from pathlib import Path
 
-from media_intake.extractors import default_registry, host_matches, url_host
+from media_intake.extractors import host_matches, url_host
 from media_intake.extractors.douyin import DouyinBackend, matches as douyin_matches
 from media_intake.extractors.xiaohongshu import XiaohongshuBackend, matches as xhs_matches
-from media_intake.extractors.ytdlp import YtDlpBackend, parse_flat_entries, resolve_entry_url
+from media_intake.extractors.ytdlp import parse_flat_entries, resolve_entry_url
 
 
-def test_default_registry_uses_ytdlp_even_for_douyin_urls() -> None:
-    registry = default_registry(Path("yt-dlp"))
-    assert [b.name for b in registry.backends] == ["yt-dlp"]
-    backend = registry.choose("https://www.douyin.com/video/123")
-    assert isinstance(backend, YtDlpBackend)
-    backend = registry.choose("https://www.xiaohongshu.com/explore/abc")
-    assert isinstance(backend, YtDlpBackend)
-
-
-def test_stub_backends_match_known_hosts_but_are_not_implemented() -> None:
+def test_site_backend_host_matching() -> None:
     assert douyin_matches("https://v.douyin.com/abc/")
     assert douyin_matches("https://www.iesdouyin.com/share/video/1")
     assert not douyin_matches("https://example.com/x")
     assert xhs_matches("https://www.xiaohongshu.com/explore/1")
     assert xhs_matches("https://xhslink.com/abc")
-    douyin = DouyinBackend()
-    xhs = XiaohongshuBackend()
-    assert douyin.matches("https://www.douyin.com/video/1")
-    assert xhs.matches("https://www.xiaohongshu.com/explore/1")
-    try:
-        douyin.download("https://www.douyin.com/video/1", Path("."), None, None)  # type: ignore[arg-type]
-        raise AssertionError("expected NotImplementedError")
-    except NotImplementedError:
-        pass
-    try:
-        xhs.expand("https://www.xiaohongshu.com/user/1", None, None, max_items=None)  # type: ignore[arg-type]
-        raise AssertionError("expected NotImplementedError")
-    except NotImplementedError:
-        pass
+    assert DouyinBackend().matches("https://www.douyin.com/video/1")
+    assert XiaohongshuBackend().matches("https://www.xiaohongshu.com/explore/1")
 
 
 def test_host_matches() -> None:
