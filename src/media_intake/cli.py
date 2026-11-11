@@ -207,7 +207,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "mcp",
         help="以 stdio 方式启动 MCP 服务",
         description=(
-            "启动最小的 stdio MCP 服务器，提供 submit_batch、get_status、read_manifest 三个工具。"
+            "启动 stdio MCP 服务器，提供 submit_batch、get_status、read_manifest、read_item、read_transcript、search_library、get_metadata 等工具。"
             "需要先安装 media-intake[mcp]。请由 MCP 客户端拉起本命令，不要在终端里交互使用。\n\n"
             + LEGAL_NOTE
         ),

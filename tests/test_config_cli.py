@@ -80,3 +80,7 @@ def test_mcp_help_lists_tools() -> None:
     assert "submit_batch" in text
     assert "get_status" in text
     assert "read_manifest" in text
+    assert "read_item" in text
+    assert "read_transcript" in text
+    assert "search_library" in text
+    assert "get_metadata" in text

@@ -11,8 +11,12 @@ from typing import Any, Callable
 from media_intake.config import BatchOptions
 from media_intake.errors import DependencyError, InputError
 from media_intake.library import MANIFEST_NAME, STATE_DIR_NAME, utc_now
+from media_intake.metadata import get_metadata as lookup_metadata
 from media_intake.models import RunReport
 from media_intake.pipeline import run_batch
+from media_intake.query import read_item as lookup_item
+from media_intake.query import read_transcript as lookup_transcript
+from media_intake.query import search_library as lookup_search
 from media_intake.store import JobStore
 from media_intake.transcribe import TranscribeMode, WHISPER_INSTALL_HINT, parse_transcribe_mode, whisper_is_installed
 
@@ -159,7 +163,65 @@ class BatchManager:
                     break
         return {"library": str(root), "count": len(records), "records": records}
 
+    def read_item(self, library: str, id: str) -> dict[str, Any]:
+        """读取已入库条目的元数据（含正文是否可读、正文长度，不含整篇正文）。"""
+        return lookup_item(library, id)
+
+    def read_transcript(
+        self,
+        library: str,
+        id: str,
+        *,
+        kind: str = "auto",
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """读取来源字幕或转写纯文本，按字符分页并返回总长度。"""
+        kwargs: dict[str, Any] = {"kind": kind, "offset": offset}
+        if limit is not None:
+            kwargs["limit"] = limit
+        return lookup_transcript(library, id, **kwargs)
+
+    def search_library(
+        self,
+        library: str,
+        query: str,
+        *,
+        limit: int = 20,
+        in_text: bool = True,
+    ) -> dict[str, Any]:
+        """按标题、来源、ID 或正文检索素材库。"""
+        return lookup_search(library, query, limit=limit, in_text=in_text)
+
+    def get_metadata(
+        self,
+        target: str,
+        library: str | None = None,
+        *,
+        cookies: str | None = None,
+        cookies_from_browser: str | None = None,
+        runner: Any | None = None,
+    ) -> dict[str, Any]:
+        """读取已入库条目，或在不下载的情况下探测链接 / 本地文件的标题、时长和字幕情况。"""
+        options = None
+        if cookies or cookies_from_browser:
+            cookies_path = Path(cookies).expanduser() if cookies else None
+            if cookies_path is not None and not cookies_path.is_file():
+                raise InputError(f"找不到 cookies 文件：{cookies_path}")
+            options = BatchOptions(
+                library_root=Path(library) if library else Path("."),
+                cookies_file=cookies_path,
+                cookies_from_browser=cookies_from_browser,
+            )
+        return lookup_metadata(
+            target,
+            library=library,
+            options=options,
+            runner=runner if runner is not None else self._runner,
+        )
+
     def _lookup_batch(self, batch_id: str, library: str | None) -> dict[str, Any] | None:
+
         with self._lock:
             rec = self._batches.get(batch_id)
             if rec is not None:

@@ -81,7 +81,16 @@ def test_tool_handlers_validate_inputs(tmp_path: Path) -> None:
         async with Client(server) as client:
             listed = await client.list_tools()
             names = {tool.name for tool in listed.tools}
-            assert names == {"submit_batch", "get_status", "read_manifest"}
+            expected = {
+                "submit_batch",
+                "get_status",
+                "read_manifest",
+                "read_item",
+                "read_transcript",
+                "search_library",
+                "get_metadata",
+            }
+            assert names == expected
             empty = await client.call_tool(
                 "submit_batch",
                 {"items": [], "library": str(tmp_path / "lib")},
@@ -153,5 +162,27 @@ def test_inprocess_roundtrip_local_media(tmp_path: Path) -> None:
                 )
             )
             assert only_local["count"] == manifest["count"]
+            item_meta = _payload(
+                await client.call_tool("read_item", {"library": str(library), "id": job_id})
+            )
+            assert item_meta["has_source_text"] is True
+            assert item_meta["title"]
+            body = _payload(
+                await client.call_tool(
+                    "read_transcript",
+                    {"library": str(library), "id": job_id, "kind": "source", "limit": 200},
+                )
+            )
+            assert "本地测试字幕" in body["text"]
+            assert body["total_length"] >= body["returned_length"]
+            assert body["next_offset"] is None
+            found = _payload(
+                await client.call_tool(
+                    "search_library",
+                    {"library": str(library), "query": "本地测试字幕"},
+                )
+            )
+            assert found["count"] >= 1
+            assert found["records"][0]["id"] == job_id
 
     asyncio.run(go())
