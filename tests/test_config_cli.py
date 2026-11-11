@@ -57,6 +57,8 @@ def test_root_help_contains_legal_note() -> None:
     assert "worker" in text
     assert "submit" in text
     assert "cancel" in text
+    assert "import" in text
+    assert "cookies" in text
 
 
 def test_missing_cookies_file_returns_error(tmp_path: Path) -> None:

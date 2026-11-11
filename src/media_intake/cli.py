@@ -8,11 +8,14 @@ from pathlib import Path
 from media_intake import __version__
 from media_intake.batches import BatchManager
 from media_intake.config import BatchOptions
+from media_intake.cookies_check import inspect_cookies
 from media_intake.deps import doctor_text, update_ytdlp
 from media_intake.errors import IntakeError
+from media_intake.importer import import_local_media
 from media_intake.inputs import parse_lines, read_input_file
 from media_intake.pipeline import run_batch
 from media_intake.report import format_report
+from media_intake.settings import KNOWN_KEYS, load_settings
 
 LEGAL_NOTE = "本工具用于下载你自己的作品，以及平台条款或许可证允许下载的内容。"
 
@@ -20,8 +23,14 @@ DEFAULT_LIBRARY = "media-library"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    argv_list = list(argv) if argv is not None else None
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--config")
+    pre_args, _ = pre.parse_known_args(argv_list)
+    settings = load_settings(pre_args.config)
     parser = _build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    _apply_settings(parser, settings)
+    args = parser.parse_args(argv_list)
     try:
         return _dispatch(args)
     except IntakeError as exc:
@@ -43,6 +52,11 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument(
+        "--config",
+        metavar="FILE",
+        help="读取 TOML 配置文件；默认还会合并 ~/.config/media-intake/config.toml 与当前目录的 media-intake.toml。命令行选项优先",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     run_p = sub.add_parser(
@@ -165,13 +179,60 @@ def _build_parser() -> argparse.ArgumentParser:
     batches_p.add_argument("--status", help="按状态过滤，例如 queued、running、succeeded、cancelled")
     batches_p.add_argument("--limit", type=int, default=None, help="最多列出多少条")
 
-    sub.add_parser(
+    doctor_p = sub.add_parser(
         "doctor",
-        help="检查 ffmpeg、ffprobe、yt-dlp，以及可选的 faster-whisper 和 MCP SDK",
-        description="检查本机依赖（ffmpeg、ffprobe、yt-dlp；faster-whisper 与 MCP SDK 为可选项），并在缺失时给出安装提示。\n\n" + LEGAL_NOTE,
+        help="检查 ffmpeg、ffprobe、yt-dlp，以及可选转写依赖、MCP SDK 和 cookies",
+        description=(
+            "检查本机依赖（ffmpeg、ffprobe、yt-dlp；faster-whisper、whisperx 与 MCP SDK 为可选项），"
+            "并在缺失时给出安装提示。可选检查抖音 / 小红书 cookies 是否存在、过期或缺少登录字段，不会打印 cookie 值。\n\n"
+            + LEGAL_NOTE
+        ),
         epilog=LEGAL_NOTE,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    _add_cookie_arguments(doctor_p)
+
+    cookies_p = sub.add_parser(
+        "cookies",
+        help="检查抖音 / 小红书 cookies 是否可用（不打印值）",
+        description=(
+            "检查 Netscape cookies 文件或本机浏览器 cookies 中，抖音与小红书的关键字段是否存在或过期。"
+            "只报告名称、域名和过期时间，不会打印 cookie 值。"
+            "本工具不会绕过登录墙或反爬校验。\n\n"
+            + LEGAL_NOTE
+        ),
+        epilog=LEGAL_NOTE,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    cookies_sub = cookies_p.add_subparsers(dest="cookies_command", required=True)
+    cookies_check = cookies_sub.add_parser(
+        "check",
+        help="检查 cookies 文件或浏览器 cookies",
+        description=cookies_p.description,
+        epilog=LEGAL_NOTE,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _add_cookie_arguments(cookies_check)
+
+    import_p = sub.add_parser(
+        "import",
+        help="把外部工具已下载的本地文件导入素材库",
+        description=(
+            "将本地音视频或图片归档进素材库，并可附上来源链接、标题、作者等元数据。"
+            "适合先用你信任的抖音 / 小红书专用工具取到文件，再交给本工具做入库和转写。"
+            "不会访问来源网站，也不会绕过反爬。\n\n"
+            + LEGAL_NOTE
+        ),
+        epilog=LEGAL_NOTE,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    import_p.add_argument("file", help="要导入的本地媒体文件")
+    import_p.add_argument("--source-url", help="原始页面链接，写入清单并用于稳定去重")
+    import_p.add_argument("--title", help="覆盖标题")
+    import_p.add_argument("--uploader", help="作者或账号名")
+    import_p.add_argument("--platform", help="平台名，例如 douyin、xiaohongshu")
+    import_p.add_argument("--upload-date", help="发布日期，建议 YYYYMMDD")
+    _add_batch_arguments(import_p)
     sub.add_parser(
         "mcp",
         help="以 stdio 方式启动 MCP 服务",
@@ -363,7 +424,20 @@ def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "doctor":
         text, code = doctor_text()
         print(text, end="")
+        cookie_args = _cookie_args(args)
+        if cookie_args[0] is not None or cookie_args[1] is not None:
+            cookie_text, _reports, cookie_code = inspect_cookies(
+                cookies_file=cookie_args[0],
+                cookies_from_browser=cookie_args[1],
+            )
+            print(cookie_text, end="")
+            if cookie_code != 0 and code == 0:
+                code = cookie_code
         return code
+    if args.command == "cookies":
+        return _cmd_cookies(args)
+    if args.command == "import":
+        return _cmd_import(args)
     if args.command == "update-yt-dlp":
         text, code = update_ytdlp()
         print(text, end="")
@@ -575,6 +649,77 @@ def _format_batch_list(result: dict) -> str:
         lines.append(_format_one_batch(rec))
         lines.append("")
     return "\n".join(lines)
+
+
+
+
+def _add_cookie_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--cookies",
+        metavar="FILE",
+        help="Netscape 格式的 cookies 文件（不会打印文件内容）",
+    )
+    parser.add_argument(
+        "--cookies-from-browser",
+        metavar="BROWSER[:PROFILE]",
+        help="从本机浏览器读取 cookies 并只检查名称与过期时间，例如 chrome 或 chrome:Default",
+    )
+
+
+def _cookie_args(args: argparse.Namespace) -> tuple[Path | None, str | None]:
+    path = Path(args.cookies).expanduser() if getattr(args, "cookies", None) else None
+    browser = getattr(args, "cookies_from_browser", None)
+    return path, browser
+
+
+def _cmd_cookies(args: argparse.Namespace) -> int:
+    path, browser = _cookie_args(args)
+    if path is None and not browser:
+        print("错误：请提供 --cookies 或 --cookies-from-browser", file=sys.stderr)
+        return 2
+    text, _reports, code = inspect_cookies(cookies_file=path, cookies_from_browser=browser)
+    print(text, end="")
+    return code
+
+
+def _cmd_import(args: argparse.Namespace) -> int:
+    try:
+        options = _options_from_args(args)
+    except ValueError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 2
+    if options.cookies_file is not None and not options.cookies_file.is_file():
+        print(f"错误：找不到 cookies 文件：{options.cookies_file}", file=sys.stderr)
+        return 2
+    report = import_local_media(
+        Path(args.file),
+        options,
+        source_url=args.source_url,
+        title=args.title,
+        uploader=args.uploader,
+        platform=args.platform,
+        upload_date=args.upload_date,
+    )
+    print(format_report(report), end="")
+    print(f"素材库：{options.library_root}")
+    print(f"清单：{options.library_root / 'manifest.jsonl'}")
+    print(f"索引：{options.library_root / 'index.md'}")
+    return report.exit_code
+
+
+def _apply_settings(parser: argparse.ArgumentParser, settings: dict) -> None:
+    clean = {key: value for key, value in settings.items() if key in KNOWN_KEYS}
+    if not clean or parser._subparsers is None:
+        return
+    for action in parser._subparsers._group_actions:
+        for sub in action.choices.values():
+            applicable = {
+                key: value
+                for key, value in clean.items()
+                if any(getattr(opt, "dest", None) == key for opt in sub._actions)
+            }
+            if applicable:
+                sub.set_defaults(**applicable)
 
 
 def _collect_items(args: argparse.Namespace) -> list[str]:
