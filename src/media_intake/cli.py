@@ -356,7 +356,7 @@ def _add_batch_arguments(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         metavar="OPT",
-        help="额外传给 yt-dlp 的单个参数，可重复。可用于登录相关选项，例如 --ytdlp-option --username",
+        help="额外传给 yt-dlp 的单个参数，可重复。若参数本身以 - 开头，请写成 --ytdlp-option=--foo，例如 --ytdlp-option=--username",
     )
     parser.add_argument(
         "--transcribe",
