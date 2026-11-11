@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "media-intake"
+version = "0.1.0"
+description = "Queue permitted media links or local files into a material library with source subtitles."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "hzopc1031" }]
+keywords = ["yt-dlp", "subtitles", "media", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia",
+]
+dependencies = [
+    "yt-dlp>=2024.8.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+media-intake = "media_intake.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/hzopc1031/media-intake"
+Issues = "https://github.com/hzopc1031/media-intake/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+media_intake = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "online: tests that may download from real platforms (opt-in; skipped unless MEDIA_INTAKE_ONLINE=1)",
+]
