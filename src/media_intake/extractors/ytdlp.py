@@ -78,7 +78,7 @@ def build_expand_argv(
         "--skip-download",
         "--no-warnings",
         "--print",
-        "%({id,url,webpage_url,title,duration,ie_key,extractor}j)",
+        "%(.{id,url,webpage_url,title,duration,ie_key,extractor})j",
     ]
     if max_items is not None:
         argv.extend(["--playlist-end", str(max_items)])
